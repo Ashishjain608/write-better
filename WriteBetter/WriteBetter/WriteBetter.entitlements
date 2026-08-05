@@ -2,11 +2,32 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>com.apple.security.app-sandbox</key>
-    <false/>
-    <key>com.apple.security.automation.apple-events</key>
-    <true/>
-    <key>com.apple.security.network.client</key>
-    <true/>
+	<!--
+	  Deliberately minimal. WriteBetter runs UNSANDBOXED with the hardened
+	  runtime enabled, which is the normal shape for a Developer-ID-distributed
+	  menu-bar utility.
+
+	  Why unsandboxed is not negotiable: AXIsProcessTrusted() always returns
+	  false inside the sandbox and the Accessibility prompt never appears, so
+	  auto-capture and Replace-in-place could not exist at all
+	  (DESIGN-BRIEF §9.3).
+
+	  Accessibility is a TCC permission, not an entitlement — there is nothing
+	  to declare here for it.
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+
+	<!-- Talking to the Anthropic / OpenAI / Gemini APIs. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+
+	<!--
+	  Required under the hardened runtime for Replace-in-place: reactivating the
+	  previously-frontmost app and handing it the improved text. Grants nothing
+	  on its own — TCC still prompts per target app.
+	-->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
 </dict>
 </plist>

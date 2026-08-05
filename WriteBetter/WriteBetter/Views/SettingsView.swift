@@ -1,113 +1,125 @@
 import SwiftUI
 
+/// The real macOS settings window (§7.2).
+///
+/// A `TabView` inside SwiftUI's `Settings` scene automatically picks up the
+/// system's settings toolbar style with centred tabs — the HIG explicitly says not
+/// to hand-roll a lookalike. The last-viewed tab is restored on reopen, and there
+/// is no Save button: everything applies immediately.
 struct SettingsView: View {
-    @State private var apiKey: String = Constants.loadAPIKey() ?? ""
-    @State private var showingAPIKeyInfo = false
+    @ObservedObject var settings: SettingsStore
+    @ObservedObject var router: SettingsRouter
 
-    private var hasValidAPIKey: Bool {
-        !apiKey.trimmingCharacters(in: .whitespaces).isEmpty
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                Section {
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: "key.fill")
-                            .foregroundColor(.blue)
-                            .font(.title2)
+        TabView(selection: $router.tab) {
+            ProvidersSettingsView(settings: settings, router: router)
+                .tabItem { Label(SettingsRouter.Tab.providers.title,
+                                 systemImage: SettingsRouter.Tab.providers.icon) }
+                .tag(SettingsRouter.Tab.providers)
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Anthropic API Key")
-                                .font(.headline)
+            GeneralSettingsView(settings: settings)
+                .tabItem { Label(SettingsRouter.Tab.general.title,
+                                 systemImage: SettingsRouter.Tab.general.icon) }
+                .tag(SettingsRouter.Tab.general)
 
-                            SecureField("sk-ant-...", text: $apiKey)
-                                .textFieldStyle(.roundedBorder)
-                                .onChange(of: apiKey) { newValue in
-                                    Constants.saveAPIKey(newValue)
-                                }
-
-                            HStack(spacing: 4) {
-                                Image(systemName: hasValidAPIKey ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                                    .foregroundColor(hasValidAPIKey ? .green : .orange)
-                                    .imageScale(.small)
-                                Text(hasValidAPIKey ? "API key configured" : "API key required")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 8)
-                } header: {
-                    Text("Configuration")
-                }
-
-                Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "info.circle.fill")
-                                .foregroundColor(.blue)
-                            Text("About WriteBetter")
-                                .font(.headline)
-                        }
-
-                        Text("WriteBetter is a macOS utility that improves your text using AI.")
-                            .font(.body)
-                            .foregroundColor(.secondary)
-
-                        Divider()
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("How to use:")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label("Select any text in any app", systemImage: "1.circle.fill")
-                                Label("Press Cmd+Shift+Space", systemImage: "2.circle.fill")
-                                Label("Review and customize the improved text", systemImage: "3.circle.fill")
-                                Label("Copy and paste", systemImage: "4.circle.fill")
-                            }
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        }
-
-                        Divider()
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Requirements:")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label("Anthropic API key (get from console.anthropic.com)", systemImage: "key")
-                                Label("Accessibility permissions (will be requested on first use)", systemImage: "checkmark.shield")
-                            }
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        }
-
-                        Divider()
-
-                        HStack {
-                            Link("Get API Key", destination: URL(string: "https://console.anthropic.com/")!)
-                            Text("•")
-                                .foregroundColor(.secondary)
-                            Link("Documentation", destination: URL(string: "https://docs.anthropic.com/")!)
-                        }
-                        .font(.caption)
-                    }
-                    .padding(.vertical, 8)
-                } header: {
-                    Text("Information")
-                }
-            }
-            .formStyle(.grouped)
+            AboutSettingsView(settings: settings)
+                .tabItem { Label(SettingsRouter.Tab.about.title,
+                                 systemImage: SettingsRouter.Tab.about.icon) }
+                .tag(SettingsRouter.Tab.about)
         }
-        .frame(width: 550, height: 500)
+        .frame(width: 560)
+        .frame(minHeight: 560, idealHeight: 620, maxHeight: 760)
+        .background(Theme.Color.surface)
+        // M21 — the tab change is a cross-fade.
+        .animation(Theme.Motion.curve(.easeInOut(duration: 0.15), reduceMotion: reduceMotion),
+                   value: router.tab)
     }
 }
 
-#Preview {
-    SettingsView()
+/// Shared chrome for a settings pane: 24pt horizontal / 20pt vertical inset, scrolling.
+struct SettingsPane<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.xxl) {
+                content
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.Space.h1)
+            .padding(.vertical, Theme.Space.xxl)
+        }
+        .background(Theme.Color.surface)
+    }
+}
+
+/// A titled group of rows — the shape every settings section uses.
+struct SettingsGroup<Content: View>: View {
+    private let title: String
+    private let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            SectionHeader(title)
+            VStack(spacing: 0) { content }
+                .cardSurface()
+        }
+    }
+}
+
+/// One 36pt (or 44pt with a subtitle) row inside a `SettingsGroup`.
+struct SettingsRow<Trailing: View>: View {
+    private let title: String
+    private let subtitle: String?
+    private let trailing: Trailing
+
+    init(_ title: String, subtitle: String? = nil, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Theme.Space.lg) {
+            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                Text(title).textStyle(.label)
+                if let subtitle {
+                    Text(subtitle)
+                        .textStyle(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: Theme.Space.lg)
+            trailing
+        }
+        .padding(.horizontal, Theme.Space.lg)
+        .frame(minHeight: subtitle == nil ? 36 : 44)
+        .padding(.vertical, subtitle == nil ? 0 : Theme.Space.md)
+    }
+}
+
+/// A hairline between rows in a group.
+struct SettingsDivider: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        Rectangle()
+            .fill(Theme.Color.stroke(reduceTransparency: reduceTransparency))
+            .frame(height: 1)
+            .accessibilityHidden(true)
+    }
+}
+
+#Preview("Settings") {
+    SettingsView(settings: .shared, router: SettingsRouter())
 }

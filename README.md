@@ -1,190 +1,172 @@
 # WriteBetter
 
-A native macOS utility that improves your text using AI. Select any text, press `Cmd+Shift+Space`, and get instant AI-powered text improvements.
+A menu-bar utility for macOS that rewrites whatever text you have on hand.
+Copy something, press `⇧⌘Space`, and a floating panel streams a better version
+back at you — then you copy it or paste it straight back where it came from.
 
-## Features
+No Dock icon, no window to manage, no account. Your API key stays in your Mac's
+Keychain and the text goes to the provider you chose and nowhere else.
 
-- **System-wide text improvement** - Works in any macOS application
-- **Quick actions** - Professional, Friendly, Concise, or Detailed presets
-- **Custom prompts** - Fine-tune improvements with your own instructions
-- **Powered by Claude** - Uses Anthropic's Claude API for high-quality results
-- **Native macOS app** - Built with Swift & SwiftUI for optimal performance
-- **Cursor-positioned popup** - Appears right where you're working
+---
 
-## How to Use
+## What it does
 
-1. Select any text in any application
-2. Press `Cmd+Shift+Space`
-3. Review the improved text
-4. Use quick actions or custom prompts to refine
-5. Click "Copy & Close" to use the improved text
+- **Three providers, your key.** Anthropic (Claude), OpenAI (GPT) and Google
+  Gemini. Add a key for any or all of them in Settings and switch between them
+  from the panel.
+- **Streaming.** The first words appear while the rest is still being written.
+  `esc` cancels the request for real, and you keep whatever arrived.
+- **Quick actions.** Fix Grammar, Clarify, Shorten, Professional, Friendly —
+  one click or `⌘1`…`⌘5`.
+- **Free-form prompts.** `⌘K`, tell it what you actually want, `⌘↩`.
+- **Clipboard-first capture.** By default WriteBetter reads your clipboard, so
+  it needs no permissions at all: copy with `⌘C`, then hit the hotkey.
+- **Optional Accessibility upgrade.** Grant Accessibility and two extra things
+  become possible: capturing the current selection without you pressing `⌘C`,
+  and *Replace in place* (`⌘↩`) which pastes the result back into the app you
+  came from. Both are optional; the app is fully usable without them.
 
-## Setup Instructions
+## Requirements
 
-### 1. Prerequisites
+- macOS **14.0** (Sonoma) or later, Apple Silicon or Intel.
+- An API key from at least one of:
+  [Anthropic](https://console.anthropic.com/settings/keys) ·
+  [OpenAI](https://platform.openai.com/api-keys) ·
+  [Google AI Studio](https://aistudio.google.com/apikey)
 
-- macOS 12.0 or later
-- Xcode 14.0 or later
-- Anthropic API key ([Get one here](https://console.anthropic.com/))
+Keys are billed by the provider, per token. WriteBetter has no server, no
+account and no telemetry.
 
-### 2. Configure API Key
+## Install
 
-Add your Anthropic API key to the `.env` file:
+Download the DMG from
+[Releases](https://github.com/ashishjain/write-better/releases), open it, and
+drag **WriteBetter** to **Applications**. Launch it — the caret icon appears in
+your menu bar. Click it → **Settings…** → paste a key → **Test**.
 
-```bash
-ANTHROPIC_API_KEY=sk-ant-your-api-key-here
-```
+> **If macOS says "WriteBetter is damaged and can't be opened":** it isn't. That
+> is what macOS 15+ says about an app that has not been notarized by Apple, and
+> the old right-click → Open override no longer works. Open
+> **System Settings → Privacy & Security**, scroll to **Security**, click
+> **Open Anyway** next to WriteBetter, and confirm. Once per version.
+>
+> (Do not run `xattr -dr com.apple.quarantine` on it. It works, but it also
+> switches off the malware scan that quarantine triggers, and pasting shell
+> commands off a web page to make a security warning go away is a habit worth
+> not having.)
 
-### 3. Open in Xcode
+## Using it
 
-```bash
-cd WriteBetter
-open WriteBetter.xcodeproj
-```
+| Key | Does |
+|---|---|
+| `⇧⌘Space` | Open the panel on whatever text is available |
+| `⌘1`…`⌘5` | Run a quick action |
+| `⌘K` | Focus the prompt field |
+| `⌘R` | Regenerate |
+| `↩` | Copy the result and close |
+| `⌘↩` | Replace in place (needs Accessibility) |
+| `esc` | Cancel the stream, or close the panel |
+| `⌘,` | Settings |
 
-If the `.xcodeproj` file doesn't exist yet, create a new macOS App project in Xcode:
+### Permissions
 
-1. Open Xcode
-2. File → New → Project
-3. Choose "macOS" → "App"
-4. Product Name: `WriteBetter`
-5. Interface: `SwiftUI`
-6. Language: `Swift`
-7. Save in the `WriteBetter` directory
-
-Then add all the source files from the `WriteBetter` folder to your project.
-
-### 4. Configure Project Settings
-
-In Xcode, configure the following:
-
-**Target Settings:**
-- Deployment Target: macOS 12.0 or later
-- Bundle Identifier: `com.yourname.WriteBetter`
-
-**Signing & Capabilities:**
-- Enable "Disable Library Validation" (required for hotkey registration)
-- Add `WriteBetter.entitlements` file
-- Configure signing certificate
-
-**Build Settings:**
-- Set "Enable Hardened Runtime" to YES
-- Add `Info.plist` to the target
-
-### 5. Grant Permissions
-
-On first launch, the app will request:
-- **Accessibility permissions** - Required to capture selected text
-- Grant these in System Preferences → Security & Privacy → Privacy → Accessibility
-
-### 6. Build and Run
-
-1. Select your Mac as the build target
-2. Press `Cmd+R` to build and run
-3. The app icon will appear in your menu bar
-4. Click the icon to access Settings and add your API key
-
-## Project Structure
-
-```
-WriteBetter/
-├── WriteBetterApp.swift          # Main app entry point & menu bar setup
-├── Managers/
-│   ├── HotkeyManager.swift       # Global hotkey registration
-│   ├── TextExtractor.swift       # Text selection capture
-│   └── ConfigManager.swift       # Settings & API key management
-├── Services/
-│   ├── AIService.swift           # AI service protocol
-│   └── ClaudeService.swift       # Anthropic Claude API integration
-├── Views/
-│   ├── PopupWindow.swift         # Floating window controller
-│   ├── ImprovementView.swift    # Main improvement UI
-│   └── SettingsView.swift        # Settings panel
-├── Models/
-│   ├── ImprovementRequest.swift  # Request data model
-│   └── QuickAction.swift         # Quick action types
-└── Utils/
-    └── Constants.swift           # App constants & API key loading
-```
-
-## Architecture
-
-The app follows a clean architecture with clear separation of concerns:
-
-- **AIService Protocol** - Abstraction layer for AI providers (easy to add GPT, Gemini, etc.)
-- **ClaudeService** - Current implementation using Anthropic's API
-- **HotkeyManager** - Carbon-based global hotkey registration
-- **TextExtractor** - Accessibility API for text capture
-- **PopupWindow** - Floating NSPanel positioned at cursor
-
-## Extending the App
-
-### Adding a New AI Provider
-
-1. Create a new service conforming to `AIService` protocol
-2. Implement the `improveText(request:)` method
-3. Update settings to allow provider selection
-
-Example:
-
-```swift
-class OpenAIService: AIService {
-    func improveText(request: ImprovementRequest) async throws -> String {
-        // Implement OpenAI API call
-    }
-}
-```
-
-### Adding New Quick Actions
-
-Edit `Models/QuickAction.swift`:
-
-```swift
-enum QuickAction: String, CaseIterable {
-    case professional = "Professional"
-    case friendly = "Friendly"
-    case concise = "Concise"
-    case detailed = "Detailed"
-    case creative = "Creative"  // Add new action
-
-    var description: String {
-        switch self {
-        case .creative:
-            return "more creative and engaging"
-        // ...
-        }
-    }
-}
-```
-
-## Troubleshooting
-
-**Hotkey not working:**
-- Check Accessibility permissions in System Preferences
-- Restart the app after granting permissions
-
-**API errors:**
-- Verify your API key in Settings
-- Check internet connection
-- Ensure API key has sufficient credits
-
-**Window not appearing:**
-- Check if text was selected before pressing hotkey
-- Try clicking in a different application first
+Nothing is requested at launch. The Accessibility prompt only appears if you
+turn on **auto-capture** or use **Replace**, from
+**Settings → General**. If you change the setting in System Settings while the
+app is running, WriteBetter picks it up within a second — no restart.
 
 ## Privacy
 
-- No text is stored or logged
-- All API calls go directly to Anthropic
-- API key stored in macOS UserDefaults (or .env during development)
+- Your text is sent to the provider you selected, over TLS, and to nobody else.
+- API keys live in the macOS Keychain (`com.aj.WriteBetter.apikeys`), not in a
+  plist and not in a `.env` file.
+- Nothing is logged to disk. No analytics.
 
-## License
+---
 
-This is a hobby project for personal use.
+## Building from source
 
-## Credits
+```bash
+git clone https://github.com/ashishjain/write-better.git
+cd write-better
+open WriteBetter/WriteBetter.xcodeproj      # then ⌘R
+```
 
-Built with:
-- Swift & SwiftUI
-- Anthropic Claude API
-- Carbon framework for hotkey registration
+Or from the command line:
+
+```bash
+xcodebuild -project WriteBetter/WriteBetter.xcodeproj \
+           -scheme WriteBetter -configuration Release \
+           -derivedDataPath build/DerivedData build
+```
+
+Requirements: Xcode 16 or later. Zero third-party dependencies — no SPM
+packages, no CocoaPods, nothing to install first.
+
+The Xcode project uses a **file-system-synchronized group**: any `.swift` file
+you drop under `WriteBetter/WriteBetter/` is compiled automatically. You do not
+edit `project.pbxproj` to add sources.
+
+See [SETUP.md](SETUP.md) for the project layout, the build settings that matter,
+and how the artwork and installer are generated.
+
+## Releasing
+
+```bash
+./create-dmg.sh                        # build, sign, package, verify
+./create-dmg.sh --app /path/to/App.app # package an existing bundle only
+```
+
+The script writes `dist/WriteBetter-Installer.dmg`: a plain drag-to-Applications
+disk image with branded background art, a custom volume icon and no Finder
+chrome. It always tells you which of the two signing worlds you are in.
+
+**Release checklist**
+
+1. `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` bumped in
+   `WriteBetter.xcodeproj` (they flow into `Info.plist` automatically).
+2. `./scripts/make-icons.sh` if the mark changed.
+3. `./create-dmg.sh` — it must end with `layout verified against the .DS_Store`.
+4. Mount the DMG and look at it: background, arrow, both icons at the same
+   height, app icon on the volume.
+5. Install from the DMG on a clean account and check the hotkey, one improvement
+   per provider, and the Accessibility flow.
+6. Upload to GitHub Releases with the version in the tag.
+7. If the build was not notarized, say so in the release notes and repeat the
+   "Open Anyway" instructions there.
+
+### If you get a Developer ID
+
+This is the one thing standing between the current build and a normal install
+experience. Once you have an Apple Developer Program membership ($99/yr) and a
+**Developer ID Application** certificate in your login keychain, `create-dmg.sh`
+picks it up automatically — `security find-identity -v -p codesigning` is all it
+looks at. Then:
+
+```bash
+# once: store an App Store Connect API key as a notarytool keychain profile
+xcrun notarytool store-credentials WriteBetterNotary \
+  --key ~/keys/AuthKey_XXXXXXXXXX.p8 --key-id XXXXXXXXXX --issuer <issuer-uuid>
+
+export WRITEBETTER_NOTARY_PROFILE=WriteBetterNotary
+./create-dmg.sh
+```
+
+The script will then sign with `--options runtime --timestamp`, submit to
+`notarytool` and wait, staple the ticket to the app, rebuild the DMG around the
+stapled app, sign and staple the DMG too, and verify with `codesign --verify
+--deep --strict` and `spctl`. The Gatekeeper warning disappears from the DMG
+background art on its own, because the art is generated per build.
+
+If you prefer raw API-key credentials over a keychain profile, set
+`WRITEBETTER_NOTARY_KEY`, `WRITEBETTER_NOTARY_KEY_ID` and
+`WRITEBETTER_NOTARY_ISSUER` instead; both paths are supported.
+
+After that, a [Homebrew Cask](https://docs.brew.sh/Adding-Software-to-Homebrew)
+becomes worth doing — `brew install --cask writebetter` gives users
+install/upgrade/uninstall for free. It is not worth submitting before
+notarization works, because `brew` cannot route around Gatekeeper either.
+
+## Licence
+
+MIT.

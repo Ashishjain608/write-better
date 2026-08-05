@@ -2,9 +2,72 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDocumentTypes</key>
-	<array>
-		<dict/>
-	</array>
+	<!--
+	  This file is the app's real Info.plist: INFOPLIST_FILE points at it and
+	  GENERATE_INFOPLIST_FILE is NO, so what you read here is what ships.
+	  Do not reintroduce INFOPLIST_KEY_* build settings — they are ignored when
+	  generation is off, which is exactly how this bundle previously lost its
+	  usage-description strings.
+
+	  $(…) tokens are substituted from build settings at package time, so
+	  versions stay bumpable in one place (the .pbxproj / agvtool / CI).
+	-->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>WriteBetter</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<!--
+	  Menu-bar-only utility: no Dock tile, no app menu. Declaring it here means
+	  the app is born as an accessory. Doing it at runtime with
+	  NSApp.setActivationPolicy(.accessory) leaves a visible Dock-icon flash.
+	-->
+	<key>LSUIElement</key>
+	<true/>
+
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Ashish Jain. Released under the MIT licence.</string>
+
+	<!--
+	  Text capture is clipboard-first: WriteBetter reads whatever you last
+	  copied and needs no permission at all for that. Accessibility is a
+	  strictly optional upgrade that unlocks two things — reading the current
+	  selection without you pressing ⌘C, and pasting the result back in place.
+	-->
+	<key>NSAccessibilityUsageDescription</key>
+	<string>WriteBetter can read the text you have selected in another app and paste the improved version straight back into it. This is optional — without it, WriteBetter works from whatever you copy with ⌘C.</string>
+	<!--
+	  Replace-in-place reactivates the app you came from and sends it a paste.
+	  macOS surfaces that under Automation; without this string a hardened
+	  runtime build is terminated the first time it tries.
+	-->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>WriteBetter asks the app you were just using to accept the improved text, so “Replace” can put it back where it came from.</string>
 </dict>
 </plist>

@@ -16,6 +16,12 @@ build/
 DerivedData/
 *.build/
 
+# Packaging artifacts — create-dmg.sh writes into build/ and dist/
+dist/
+*.dmg
+*.iconset/
+.venv/
+
 # Environment variables
 .env
 

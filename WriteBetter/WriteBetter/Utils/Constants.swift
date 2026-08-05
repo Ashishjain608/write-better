@@ -1,16 +1,22 @@
 import Foundation
 
-enum Constants {
-    static let apiKeyKey = "ANTHROPIC_API_KEY"
-    static let anthropicAPIURL = "https://api.anthropic.com/v1/messages"
-    static let defaultModel = "claude-sonnet-4-5-20250929"
-    static let maxTokens = 1024
+/// App-wide tunables. API keys live in the Keychain (see `Keychain`), never here.
+nonisolated enum Constants {
+    /// Upper bound on generated tokens for a single rewrite.
+    /// Headroom matters: on models where thinking stays on (Opus 5), this caps
+    /// thinking *plus* the rewrite, so a tight budget truncates the answer.
+    static let maxOutputTokens = 8192
 
-    static func loadAPIKey() -> String? {
-        UserDefaults.standard.string(forKey: apiKeyKey)
-    }
+    /// Give up if the provider sends nothing for this long (also covers a mid-stream stall).
+    static let firstByteTimeout: TimeInterval = 20
 
-    static func saveAPIKey(_ key: String) {
-        UserDefaults.standard.set(key, forKey: apiKeyKey)
-    }
+    /// Hard ceiling on one rewrite, from connect to last byte.
+    static let overallTimeout: TimeInterval = 60
+
+    /// Keychain generic-password service holding every provider key.
+    static let keychainService = "com.aj.WriteBetter.apikeys"
+
+    /// Pre-1.0 builds kept the Anthropic key in UserDefaults under this name.
+    /// `SettingsStore` migrates it into the Keychain once, then deletes it.
+    static let legacyAnthropicDefaultsKey = "ANTHROPIC_API_KEY"
 }
