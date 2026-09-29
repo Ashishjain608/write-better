@@ -75,3 +75,20 @@ fastlane/test_output
 
 # Code Injection
 iOSInjectionProject/
+
+# Local session handoff notes (not part of the codebase)
+handoff/
+
+# Maintainer-local agent and issue-tracker tooling (not part of the project)
+.beads/
+.beads-credential-key
+.dolt/
+*.db
+*.gate.lock*
+.claude/
+.codex/
+.cursor/
+.agents/
+AGENTS.md
+CLAUDE.md
+CLAUDE.local.md

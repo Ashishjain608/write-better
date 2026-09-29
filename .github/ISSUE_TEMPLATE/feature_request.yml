@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an idea for WriteBetter
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        WriteBetter means to stay small, native and private: your key, your provider, no server, no telemetry, no dependencies it can do without. Ideas that fit that are the most likely to land.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The moment where WriteBetter gets in your way.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What do you do today instead?
