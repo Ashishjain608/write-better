@@ -38,11 +38,18 @@ struct MenuBarMenu: View {
     let delegate: AppDelegate
 
     @ObservedObject private var accessibility = AccessibilityManager.shared
+    @ObservedObject private var hotkey = HotkeyManager.shared
 
     var body: some View {
         // Disabled header row — current provider + model, or the setup nudge.
         Text(headerText)
             .font(Theme.Font.caption)
+
+        if hotkey.registrationFailed {
+            Text("\(HotkeyManager.displayString) is taken by another app")
+                .font(Theme.Font.caption)
+            Button("Retry Shortcut") { hotkey.retry() }
+        }
 
         Divider()
 
@@ -151,11 +158,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private let extractor = TextExtractor()
     private let replaceService = ReplaceService()
-    private let hotkeyManager = HotkeyManager()
+    private let hotkeyManager = HotkeyManager.shared
 
     private var panel: PopupWindowController?
     private var welcome: WelcomeWindowController?
-    private var stateObservation: Task<Void, Never>?
+    private var stateObservation: AnyCancellable?
+    private var panelCloseObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
@@ -229,6 +237,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let capture = extractor.capture(preferSelection: preferSelection)
 
+        // Detach the old session's observers first: its close must not forget the
+        // target we just remembered for the new session.
+        if let old = panelCloseObserver { NotificationCenter.default.removeObserver(old) }
+        panelCloseObserver = nil
         panel?.close()
         panel = nil
 
@@ -247,17 +259,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// the panel goes away, so a stream cancelled by closing the panel can't leave
     /// the dot pulsing forever.
     private func observe(_ controller: ImprovementController) {
-        stateObservation?.cancel()
-        stateObservation = Task { [weak self, weak controller] in
-            while !Task.isCancelled {
-                guard let self, let controller,
-                      self.panel?.window?.isVisible == true else {
-                    self?.isWorking = false
-                    return
-                }
-                let working = controller.phase.isBusy
-                if self.isWorking != working { self.isWorking = working }
-                try? await Task.sleep(for: .milliseconds(250))
+        stateObservation = controller.$phase
+            .map(\.isBusy)
+            .removeDuplicates()
+            .sink { [weak self] busy in self?.isWorking = busy }
+
+        if let old = panelCloseObserver { NotificationCenter.default.removeObserver(old) }
+        panelCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: panel?.window, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.stateObservation = nil
+                self?.isWorking = false
+                // Session over: a later hotkey press must re-capture, never reuse this target.
+                self?.replaceService.forgetFrontmostApp()
             }
         }
     }

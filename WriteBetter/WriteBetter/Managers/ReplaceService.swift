@@ -22,15 +22,19 @@ final class ReplaceService {
     /// before the panel appears.
     private(set) var sourceApp: NSRunningApplication?
 
-    /// How long the reactivated app needs before it can receive a keystroke.
-    private static let activationDelay: TimeInterval = 0.08
+    /// How long we wait for the target to become frontmost before giving up.
+    private static let activationTimeout: TimeInterval = 1.0
+    private static let activationPollStep: TimeInterval = 0.02
     /// How long the target needs to read the pasteboard before we put it back.
-    private static let pasteboardRestoreDelay: TimeInterval = 0.30
+    private static let pasteboardRestoreDelay: TimeInterval = 1.0
 
     func rememberFrontmostApp() {
         let current = NSWorkspace.shared.frontmostApplication
         // Never record ourselves — that would make Replace paste into the panel.
+        // And never keep an older app either: pasting into a stale target is worse
+        // than falling back to the clipboard.
         if current?.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+            sourceApp = nil
             return
         }
         sourceApp = current
@@ -47,37 +51,51 @@ final class ReplaceService {
 
     /// Copies `text` to the pasteboard and, when possible, pastes it into the source app.
     ///
+    /// The paste is only posted once the target is confirmed frontmost; otherwise
+    /// the text stays on the clipboard and the outcome says so.
+    ///
     /// - Parameter closePanel: called *before* the source app is reactivated —
     ///   the panel must be gone before the paste lands.
     @discardableResult
     func replace(_ text: String, closePanel: @escaping () -> Void) -> Outcome {
         let pasteboard = NSPasteboard.general
-        let previousContents = pasteboard.string(forType: .string)
+        let snapshot = PasteboardSnapshot(pasteboard)
+        let writtenCount = PasteboardSnapshot.writeTransient(text, to: pasteboard)
 
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-
-        guard canReplace, let target = sourceApp else {
+        guard canReplace, let target = sourceApp, !target.isTerminated else {
             closePanel()
+            copyToClipboard(text)   // not a temporary borrow: the user will paste this
             return .copiedToClipboard
         }
 
         closePanel()
-        target.activate(options: [])
+        guard target.activate(options: []), waitUntilFrontmost(target) else {
+            copyToClipboard(text)   // drop the transient marker and the restore
+            return .copiedToClipboard
+        }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.activationDelay) {
-            SyntheticKeystroke.postCommand(.v)
+        SyntheticKeystroke.postCommand(.v)
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.pasteboardRestoreDelay) {
-                // Restore whatever the user had before we borrowed the pasteboard.
-                if let previousContents, previousContents != text {
-                    pasteboard.clearContents()
-                    pasteboard.setString(previousContents, forType: .string)
-                }
-            }
+        // Give the target time to read the pasteboard, then put the user's
+        // clipboard back — but only if nobody has copied anything since.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pasteboardRestoreDelay) {
+            snapshot.restore(to: pasteboard, ifChangeCountIs: writtenCount)
         }
 
         return .replaced(appName: target.localizedName ?? "the app")
+    }
+
+    /// Bounded spin (same pattern as `TextExtractor`) — the caller needs an honest answer.
+    private func waitUntilFrontmost(_ target: NSRunningApplication) -> Bool {
+        let deadline = Date().addingTimeInterval(Self.activationTimeout)
+        while Date() < deadline {
+            if target.isTerminated { return false }
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier {
+                return true
+            }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(Self.activationPollStep))
+        }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier
     }
 
     /// Plain copy, no app switching. Used by `↩`, `⇧↩` and the Copy button.

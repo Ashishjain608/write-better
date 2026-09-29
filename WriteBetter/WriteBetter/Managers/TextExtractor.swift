@@ -42,7 +42,7 @@ final class TextExtractor {
     static let maxCharacters = 20_000
 
     /// How long we wait for a synthetic ⌘C to land before giving up.
-    private static let copyTimeout: TimeInterval = 0.20
+    private static let copyTimeout: TimeInterval = 0.60
 
     /// - Parameter preferSelection: the user's `autoCaptureSelection` preference.
     ///   When false we never touch the frontmost app at all.
@@ -97,30 +97,35 @@ final class TextExtractor {
 
     private func selectedTextViaSyntheticCopy() -> String? {
         let pasteboard = NSPasteboard.general
-        let previous = pasteboard.string(forType: .string)
+        let snapshot = PasteboardSnapshot(pasteboard)
         let changeCountBefore = pasteboard.changeCount
 
         SyntheticKeystroke.postCommand(.c)
 
-        // Bounded spin — the panel must still feel instant.
+        // Bounded spin — long enough for slow apps, short enough to feel instant
+        // (fast apps return in a few ms).
         let deadline = Date().addingTimeInterval(Self.copyTimeout)
         while Date() < deadline, pasteboard.changeCount == changeCountBefore {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
         }
 
-        guard pasteboard.changeCount != changeCountBefore,
-              let copied = pasteboard.string(forType: .string),
-              !copied.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else {
+        guard pasteboard.changeCount != changeCountBefore else {
+            // Nothing yet. A very slow app may still write after we give up; if it
+            // does, undo that late copy so the user's clipboard isn't hijacked.
+            // ponytail: assumes the user doesn't copy anything themselves within 1 s.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                if pasteboard.changeCount != changeCountBefore { snapshot.restore(to: pasteboard) }
+            }
             return nil
         }
 
+        let copied = pasteboard.string(forType: .string)
         // Put the user's clipboard back — we borrowed it, we return it.
-        if let previous, previous != copied {
-            pasteboard.clearContents()
-            pasteboard.setString(previous, forType: .string)
-        }
+        snapshot.restore(to: pasteboard)
 
+        guard let copied, !copied.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
         return copied
     }
 

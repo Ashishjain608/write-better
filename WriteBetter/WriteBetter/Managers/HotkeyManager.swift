@@ -1,4 +1,5 @@
 import Carbon.HIToolbox
+import Combine
 import Foundation
 
 /// The one global hotkey: ⇧⌘Space.
@@ -6,7 +7,9 @@ import Foundation
 /// Carbon's `RegisterEventHotKey` is still the only API that gives a background app
 /// a system-wide shortcut without Accessibility trust, which is why it survives here:
 /// the app must work before the user has granted anything (§9.3).
-final class HotkeyManager {
+final class HotkeyManager: ObservableObject {
+
+    static let shared = HotkeyManager()
 
     /// Rendered as keycaps wherever the shortcut is displayed.
     static let displayKeys = ["⇧", "⌘", "␣"]
@@ -17,6 +20,15 @@ final class HotkeyManager {
     private var callback: (() -> Void)?
 
     private(set) var isRegistered = false
+    /// True after a registration attempt was refused (shortcut taken by another app).
+    @Published private(set) var registrationFailed = false
+
+    /// Re-attempts registration with the callback from the first attempt.
+    @discardableResult
+    func retry() -> Bool {
+        guard let callback else { return false }
+        return registerHotkey(callback: callback)
+    }
 
     /// - Returns: false when the shortcut is already claimed by another app.
     @discardableResult
@@ -45,11 +57,21 @@ final class HotkeyManager {
             Unmanaged.passUnretained(self).toOpaque(),
             &eventHandler
         )
-        guard installStatus == noErr else { return false }
+        guard installStatus == noErr else {
+            eventHandler = nil
+            registrationFailed = true
+            return false
+        }
 
         let registerStatus = RegisterEventHotKey(keyCode, modifiers, hotKeyID,
                                                  GetApplicationEventTarget(), 0, &hotKeyRef)
         isRegistered = registerStatus == noErr
+        registrationFailed = !isRegistered
+        if !isRegistered, let handler = eventHandler {
+            // Otherwise a retry would stack a second handler.
+            RemoveEventHandler(handler)
+            eventHandler = nil
+        }
         return isRegistered
     }
 

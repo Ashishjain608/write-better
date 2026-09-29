@@ -10,8 +10,8 @@ import Combine
 ///   through `requestAccess()`, which is only ever called from a direct user click.
 ///   Nothing on the launch path can trigger it.
 /// * `AXIsProcessTrusted()` returns a stale value after the user flips the switch,
-///   so `isTrusted` is refreshed by a 1 s poll while a UI that cares is visible,
-///   capped at 120 s.
+///   so `isTrusted` is refreshed by a 1 s poll while a UI that cares is visible
+///   (until trust is seen) and whenever the app becomes active.
 /// * Deep-linking to System Settings is offered alongside the prompt, because the
 ///   prompt itself is unreliable.
 @MainActor
@@ -25,11 +25,15 @@ final class AccessibilityManager: ObservableObject {
     private var watchers = 0
 
     private static let pollInterval: Duration = .seconds(1)
-    private static let pollLimit = 120
 
     init() {
         // Non-prompting check. Safe at launch.
         isTrusted = AXIsProcessTrusted()
+        // Coming back from System Settings re-activates us: re-read right away.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
     }
 
     /// Cheap, non-prompting re-read.
@@ -39,18 +43,19 @@ final class AccessibilityManager: ObservableObject {
     }
 
     /// Ref-counted so the Welcome window and the General settings tab can both poll
-    /// without stepping on each other.
+    /// without stepping on each other. Balanced by `endPolling()` from `onDisappear`;
+    /// stops by itself once trust is granted.
     func beginPolling() {
         watchers += 1
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
-            for _ in 0..<Self.pollLimit {
+            while !Task.isCancelled {
                 try? await Task.sleep(for: Self.pollInterval)
-                if Task.isCancelled { return }
-                guard let self else { return }
+                guard let self, !Task.isCancelled else { return }
                 self.refresh()
-                if self.isTrusted { return }
+                if self.isTrusted { break }
             }
+            self?.pollTask = nil
         }
     }
 
@@ -65,7 +70,6 @@ final class AccessibilityManager: ObservableObject {
     func requestAccess() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
-        beginPolling()
     }
 
     /// The reliable path when the system prompt does not appear.
@@ -74,7 +78,6 @@ final class AccessibilityManager: ObservableObject {
         if let url {
             NSWorkspace.shared.open(url)
         }
-        beginPolling()
     }
 
     /// A sandboxed build can never be trusted, so the Replace feature is hidden

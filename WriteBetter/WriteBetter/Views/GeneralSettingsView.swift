@@ -5,6 +5,7 @@ import SwiftUI
 struct GeneralSettingsView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject private var accessibility = AccessibilityManager.shared
+    @ObservedObject private var hotkey = HotkeyManager.shared
 
     @AppStorage("appearancePreference") private var appearance: AppearancePreference = .system
     @AppStorage("reduceVisualEffects") private var reduceVisualEffects = false
@@ -27,11 +28,17 @@ struct GeneralSettingsView: View {
     private var shortcutGroup: some View {
         SettingsGroup("Shortcut") {
             SettingsRow("Improve text",
-                        subtitle: "Custom shortcuts are coming in a later release.") {
+                        subtitle: hotkey.registrationFailed
+                            ? "\(HotkeyManager.displayString) is taken by another app."
+                            : "Custom shortcuts are coming in a later release.") {
                 HStack(spacing: Theme.Space.xs) {
+                    if hotkey.registrationFailed {
+                        Button("Retry") { hotkey.retry() }
+                            .buttonStyle(SecondaryButtonStyle())
+                    }
                     ForEach(HotkeyManager.displayKeys, id: \.self) { Keycap(symbol: $0) }
                 }
-                .accessibilityElement(children: .ignore)
+                .accessibilityElement(children: hotkey.registrationFailed ? .contain : .ignore)
                 .accessibilityLabel("Shift Command Space")
             }
         }
