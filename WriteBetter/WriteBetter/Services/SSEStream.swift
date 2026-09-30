@@ -123,6 +123,44 @@ nonisolated enum StreamOutcome: Sendable, Equatable {
     case textThenDone(String)
     /// Stop reading; the response is complete.
     case done
+    /// Stop reading; the answer was cut off by the model's output limit.
+    case truncated
+    /// Emit this fragment, then stop; the answer was cut off by the output limit.
+    case textThenTruncated(String)
+}
+
+/// How a stream that produced no error ended.
+nonisolated enum StreamEnd: Sendable, Equatable {
+    /// The provider said the answer is finished.
+    case complete
+    /// The answer is incomplete. `hitLimit` is true when the model stopped at its
+    /// output limit; false when the connection just ended with no terminal event.
+    case cutOff(hitLimit: Bool)
+}
+
+/// Applies decoder outcomes to a stream. Shared by the live transport and the offline
+/// self-check, so the self-check exercises the real completion logic.
+nonisolated struct StreamPump {
+    private(set) var emitted = false
+
+    /// Returns the end state once the event terminates the stream, else `nil`.
+    mutating func handle(_ event: SSEEvent,
+                         decode: (SSEEvent) throws -> StreamOutcome,
+                         onText: (String) -> Void) throws -> StreamEnd? {
+        func emit(_ fragment: String) {
+            guard !fragment.isEmpty else { return }
+            emitted = true
+            onText(fragment)
+        }
+        switch try decode(event) {
+        case .ignore: return nil
+        case .text(let fragment): emit(fragment); return nil
+        case .textThenDone(let fragment): emit(fragment); return .complete
+        case .done: return .complete
+        case .truncated: return .cutOff(hitLimit: true)
+        case .textThenTruncated(let fragment): emit(fragment); return .cutOff(hitLimit: true)
+        }
+    }
 }
 
 // MARK: - Transport
@@ -133,7 +171,9 @@ nonisolated enum HTTPStream {
     ///
     /// `timeoutIntervalForRequest` is URLSession's inactivity timeout, so it
     /// covers both "no first byte in 20s" and "stalled mid-stream for 20s".
-    /// `timeoutIntervalForResource` is the hard 60s ceiling on the whole request.
+    /// `timeoutIntervalForResource` is the hard ceiling on the whole request; it is
+    /// generous because long rewrites are legitimate and the inactivity timeout
+    /// already catches a stalled connection.
     static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = Constants.firstByteTimeout
@@ -155,12 +195,12 @@ nonisolated enum HTTPStream {
     ///   - decode: pure per-event decoder; throws to abort with a mapped error.
     ///   - mapHTTPError: turns a non-2xx response into an `AIServiceError`.
     ///   - onText: receives every fragment, in order.
-    /// - Returns: `true` if at least one non-empty fragment was emitted.
-    @discardableResult
+    /// - Returns: whether any text was emitted, and how the stream ended. A stream that
+    ///   just stops with no terminal event counts as cut off, not as success.
     static func run(_ request: URLRequest,
                     decode: (SSEEvent) throws -> StreamOutcome,
                     mapHTTPError: (Int, Data, HTTPURLResponse) -> AIServiceError,
-                    onText: (String) -> Void) async throws -> Bool {
+                    onText: (String) -> Void) async throws -> (emitted: Bool, end: StreamEnd) {
         let (bytes, response) = try await session.bytes(for: request)
 
         guard let http = response as? HTTPURLResponse else {
@@ -177,39 +217,57 @@ nonisolated enum HTTPStream {
         }
 
         var scanner = SSEByteScanner()
-        var emitted = false
-
-        func handle(_ event: SSEEvent) throws -> Bool {
-            switch try decode(event) {
-            case .ignore:
-                return false
-            case .text(let fragment):
-                if !fragment.isEmpty {
-                    emitted = true
-                    onText(fragment)
-                }
-                return false
-            case .textThenDone(let fragment):
-                if !fragment.isEmpty {
-                    emitted = true
-                    onText(fragment)
-                }
-                return true
-            case .done:
-                return true
-            }
-        }
+        var pump = StreamPump()
 
         for try await byte in bytes {
             try Task.checkCancellation()
             guard let event = scanner.consume(byte: byte) else { continue }
-            if try handle(event) { return emitted }
+            if let end = try pump.handle(event, decode: decode, onText: onText) {
+                return (pump.emitted, end)
+            }
         }
 
         for event in scanner.finish() {
-            if try handle(event) { return emitted }
+            if let end = try pump.handle(event, decode: decode, onText: onText) {
+                return (pump.emitted, end)
+            }
         }
-        return emitted
+        return (pump.emitted, .cutOff(hitLimit: false))
+    }
+
+    /// The whole `improveTextStream` body every provider shares: build, stream, map
+    /// errors, and finish with `AIServiceError.cutOff` when the answer is incomplete.
+    /// The fragments are yielded before the error, so the partial text is never lost.
+    static func textStream(
+        emptyMessage: String,
+        prepare: @escaping @Sendable () throws -> URLRequest,
+        decode: @escaping @Sendable (SSEEvent) throws -> StreamOutcome,
+        mapHTTPError: @escaping @Sendable (Int, Data, HTTPURLResponse) -> AIServiceError,
+        mapTransport: @escaping @Sendable (Error) -> AIServiceError = { HTTPStream.transportError($0) }
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let urlRequest = try prepare()
+                    let result = try await run(urlRequest,
+                                               decode: decode,
+                                               mapHTTPError: mapHTTPError,
+                                               onText: { continuation.yield($0) })
+                    if !result.emitted { throw AIServiceError.api(emptyMessage) }
+                    if case .cutOff(let hitLimit) = result.end {
+                        throw AIServiceError.cutOff(hitLimit: hitLimit)
+                    }
+                    continuation.finish()
+                } catch {
+                    if isCancellation(error) {
+                        continuation.finish()
+                    } else {
+                        continuation.finish(throwing: mapTransport(error))
+                    }
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     /// Fires a non-streaming request and returns the body plus response.

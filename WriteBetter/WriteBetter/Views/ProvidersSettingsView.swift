@@ -32,10 +32,33 @@ struct ProvidersSettingsView: View {
                 }
             }
 
+            if case .unavailable(let reason) = AppleIntelligence.availability {
+                appleUnavailableNote(reason)
+            }
+
             if let removedKey {
                 undoPill(for: removedKey)
             }
         }
+        .onAppear { settings.refreshProviderAvailability() }
+    }
+
+    /// Apple's on-device model is hidden everywhere it can't run; say why, once, here.
+    private func appleUnavailableNote(_ reason: String) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.lg) {
+            Image(systemName: "cpu")
+                .foregroundStyle(Theme.Color.textTertiary)
+                .font(.system(size: 13, weight: .semibold))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                Text("Apple on-device model unavailable").textStyle(.label)
+                Text(reason).textStyle(.caption).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Theme.Space.lg)
+        .cardSurface()
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Banner
@@ -49,7 +72,7 @@ struct ProvidersSettingsView: View {
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                 Text("No provider configured — WriteBetter can't run yet.")
                     .textStyle(.label)
-                Text("Add a key for any one of the three below.")
+                Text("Add a key for any provider below, or point WriteBetter at a local server.")
                     .textStyle(.caption)
             }
             Spacer(minLength: Theme.Space.lg)
@@ -70,11 +93,12 @@ struct ProvidersSettingsView: View {
     private var defaultProviderPicker: some View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
             SectionHeader("Default provider")
-            HStack(spacing: Theme.Space.lg) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Space.lg)],
+                      spacing: Theme.Space.lg) {
                 ForEach(AIProvider.allCases) { provider in
                     Button {
                         settings.selectedProvider = provider
-                        if !settings.hasKey(for: provider) {
+                        if !settings.isUsable(provider) {
                             router.expandedProvider = provider
                             router.focusRequest &+= 1
                         }
@@ -89,7 +113,7 @@ struct ProvidersSettingsView: View {
                                 Image(systemName: provider.iconSymbol)
                                     .font(.system(size: 15, weight: .medium))
                                     .foregroundStyle(provider.accent)
-                                Text(provider.displayName)
+                                Text(provider.shortName)
                                     .textStyle(.label)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.75)
@@ -101,7 +125,8 @@ struct ProvidersSettingsView: View {
                     }
                     .buttonStyle(TileButtonStyle(isSelected: settings.selectedProvider == provider))
                     .accessibilityLabel(provider.displayName)
-                    .accessibilityValue(settings.hasKey(for: provider) ? "Key saved" : "Needs a key")
+                    .accessibilityValue(settings.isUsable(provider) ? "Ready"
+                                        : (provider.needsAPIKey ? "Needs a key" : "Needs a server address"))
                     .accessibilityAddTraits(settings.selectedProvider == provider ? [.isSelected] : [])
                 }
             }
@@ -110,11 +135,13 @@ struct ProvidersSettingsView: View {
 
     private func statusCaption(for provider: AIProvider) -> some View {
         Group {
-            if settings.hasKey(for: provider) {
-                Label("key", systemImage: "checkmark.circle.fill")
+            if settings.isUsable(provider) {
+                Label(provider.needsAPIKey ? "key" : (provider == .apple ? "on-device" : "server"),
+                      systemImage: "checkmark.circle.fill")
                     .foregroundStyle(Theme.Color.success)
             } else {
-                Label("add key", systemImage: "exclamationmark.circle.fill")
+                Label(provider.needsAPIKey ? "add key" : "add server",
+                      systemImage: "exclamationmark.circle.fill")
                     .foregroundStyle(Theme.Color.warning)
             }
         }
@@ -178,7 +205,14 @@ private struct ProviderRow: View {
     @State private var isEditingKey = false
     @State private var testState: TestState = .idle
     @State private var testTask: Task<Void, Never>?
+    @State private var loadedModels: [String] = []
+    @State private var isLoadingModels = false
+    @State private var loadError: String?
+    @State private var pickedOther = false
+    @State private var otherDraft = ""
     @FocusState private var keyFieldFocused: Bool
+    @FocusState private var otherFieldFocused: Bool
+    @FocusState private var baseURLFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -212,7 +246,11 @@ private struct ProviderRow: View {
             guard isExpanded else { return }
             beginEditing()
         }
-        .onAppear { syncDraft() }
+        .onAppear {
+            syncDraft()
+            if settings.usesCustomModelID(for: provider) { otherDraft = settings.modelID(for: provider) }
+            if provider == .custom { otherDraft = settings.modelID(for: provider) }
+        }
         .onChange(of: isExpanded) { _, expanded in if expanded { syncDraft() } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(provider.displayName)
@@ -270,20 +308,40 @@ private struct ProviderRow: View {
         case .offline:
             StatusPill(text: "Offline", tint: Theme.Color.warning, systemImage: "wifi.slash")
         case .idle:
-            if settings.hasKey(for: provider) {
-                StatusPill(text: "Key saved", tint: Theme.Color.success, systemImage: "checkmark.circle.fill")
+            if settings.keyIsUnreadable(provider) {
+                StatusPill(text: "Keychain locked", tint: Theme.Color.warning,
+                           systemImage: "lock.fill")
+            } else if settings.isUsable(provider) {
+                StatusPill(text: provider.needsAPIKey ? "Key saved" : (provider == .apple ? "Ready" : "Server set"),
+                           tint: Theme.Color.success, systemImage: "checkmark.circle.fill")
             } else {
-                Text("No key").textStyle(.caption)
+                Text(provider.needsAPIKey ? "No key" : "No server").textStyle(.caption)
             }
         }
     }
 
     // MARK: Expanded body
 
+    @ViewBuilder
     private var expandedBody: some View {
+        if provider == .apple {
+            Text("""
+                 Runs on your Mac with Apple Intelligence: free, private, no key and no network. \
+                 The model has a small context window, so it suits short selections best.
+                 """)
+                .textStyle(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            keyedBody
+        }
+    }
+
+    private var keyedBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.lg) {
+            if provider == .custom { endpointSection }
+
             VStack(alignment: .leading, spacing: Theme.Space.sm) {
-                Text("API key").textStyle(.caption)
+                Text(provider.needsAPIKey ? "API key" : "API key (optional)").textStyle(.caption)
 
                 HStack(spacing: Theme.Space.md) {
                     keyField
@@ -298,8 +356,9 @@ private struct ProviderRow: View {
                         }
                     }
                     .buttonStyle(SecondaryButtonStyle(minWidth: 84))
-                    .disabled(isTesting || effectiveKey.isEmpty)
-                    .help("Check this key against \(provider.displayName)")
+                    .disabled(isTesting || (provider.needsAPIKey ? effectiveKey.isEmpty : settings.customEndpointURL == nil))
+                    .help(provider == .custom ? "Check the server address and key"
+                                              : "Check this key against \(provider.displayName)")
                     .accessibilityLabel("Test the \(provider.displayName) key")
                 }
 
@@ -324,24 +383,160 @@ private struct ProviderRow: View {
 
                 HStack(spacing: Theme.Space.md) {
                     Text("Stored in Keychain.").textStyle(.caption)
-                    ConsoleLink(provider: provider)
+                    if provider.needsAPIKey { ConsoleLink(provider: provider) }
                     Spacer(minLength: 0)
                 }
             }
 
+            if provider == .custom { customModelSection } else { modelSection }
+        }
+    }
+
+    /// Catalog picker plus an "Other…" entry, so the curated list can never strand a user.
+    private var modelSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
             HStack(spacing: Theme.Space.lg) {
                 Text("Model").textStyle(.caption)
                 Spacer(minLength: Theme.Space.lg)
-                Picker("", selection: modelBinding) {
+                Picker("", selection: modelChoice) {
                     ForEach(provider.models) { model in
                         Text("\(model.name) · \(model.blurb)").tag(model.id)
                     }
+                    Divider()
+                    Text("Other…").tag(Self.otherTag)
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .frame(maxWidth: 260)
                 .accessibilityLabel("\(provider.displayName) model")
             }
+            if showsOtherField {
+                HStack(spacing: Theme.Space.md) {
+                    TextField("Model id, e.g. \(provider.defaultModelID)", text: $otherDraft)
+                        .textFieldStyle(.plain)
+                        .font(Theme.Font.mono)
+                        .foregroundStyle(Theme.Color.textPrimary)
+                        .focused($otherFieldFocused)
+                        .onSubmit(commitOtherModel)
+                        .onChange(of: otherFieldFocused) { _, focused in if !focused { commitOtherModel() } }
+                        .padding(.horizontal, Theme.Space.lg)
+                        .frame(height: 32)
+                        .sunkenSurface(radius: Theme.Radius.control,
+                                       stroke: otherFieldFocused ? provider.accent.opacity(0.7) : nil)
+                        .accessibilityLabel("\(provider.displayName) model id")
+                }
+                Text("Sent exactly as typed. Newer models may need a newer WriteBetter.")
+                    .textStyle(.caption)
+            }
+        }
+    }
+
+    // MARK: Custom endpoint
+
+    private var endpointSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            HStack(spacing: Theme.Space.md) {
+                Text("Base URL").textStyle(.caption)
+                Spacer(minLength: Theme.Space.md)
+                Menu("Presets") {
+                    ForEach(CustomEndpointService.presets) { preset in
+                        Button(preset.name) {
+                            settings.customBaseURL = preset.baseURL
+                            testState = .idle
+                            loadedModels = []
+                        }
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel("Server presets")
+            }
+            TextField("http://localhost:11434/v1", text: $settings.customBaseURL)
+                .textFieldStyle(.plain)
+                .font(Theme.Font.mono)
+                .foregroundStyle(Theme.Color.textPrimary)
+                .focused($baseURLFocused)
+                .onChange(of: settings.customBaseURL) { _, _ in testState = .idle; loadedModels = [] }
+                .padding(.horizontal, Theme.Space.lg)
+                .frame(height: 32)
+                .sunkenSurface(radius: Theme.Radius.control,
+                               stroke: baseURLFocused ? provider.accent.opacity(0.7) : nil)
+                .accessibilityLabel("Custom endpoint base URL")
+            if !settings.customBaseURL.trimmingCharacters(in: .whitespaces).isEmpty,
+               settings.customEndpointURL == nil {
+                Label("That doesn't look like a URL. Try http://localhost:11434/v1.",
+                      systemImage: "exclamationmark.circle.fill")
+                    .textStyle(.caption)
+                    .foregroundStyle(Theme.Color.warning)
+            } else {
+                Text("Any server that speaks the OpenAI Chat Completions API: Ollama, LM Studio, OpenRouter…")
+                    .textStyle(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var customModelSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            HStack(spacing: Theme.Space.md) {
+                Text("Model").textStyle(.caption)
+                Spacer(minLength: Theme.Space.md)
+                if !loadedModels.isEmpty {
+                    Menu("\(loadedModels.count) models") {
+                        ForEach(loadedModels, id: \.self) { id in
+                            Button(id) { settings.setModelID(id, for: .custom); otherDraft = id }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+                Button(action: loadModels) {
+                    HStack(spacing: Theme.Space.sm) {
+                        if isLoadingModels { ProgressView().controlSize(.small) }
+                        Text(isLoadingModels ? "Loading…" : "Load models")
+                    }
+                }
+                .buttonStyle(SecondaryButtonStyle(minWidth: 110))
+                .disabled(isLoadingModels || settings.customEndpointURL == nil)
+                .help("Ask the server which models it has")
+            }
+            TextField("Model id, e.g. llama3.2", text: $otherDraft)
+                .textFieldStyle(.plain)
+                .font(Theme.Font.mono)
+                .foregroundStyle(Theme.Color.textPrimary)
+                .focused($otherFieldFocused)
+                .onSubmit(commitOtherModel)
+                .onChange(of: otherFieldFocused) { _, focused in if !focused { commitOtherModel() } }
+                .padding(.horizontal, Theme.Space.lg)
+                .frame(height: 32)
+                .sunkenSurface(radius: Theme.Radius.control,
+                               stroke: otherFieldFocused ? provider.accent.opacity(0.7) : nil)
+                .accessibilityLabel("Custom endpoint model id")
+            if let loadError {
+                Label(loadError, systemImage: "exclamationmark.triangle.fill")
+                    .textStyle(.caption)
+                    .foregroundStyle(Theme.Color.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func loadModels() {
+        guard let base = settings.customEndpointURL else { return }
+        isLoadingModels = true
+        loadError = nil
+        let key = effectiveKey
+        Task { @MainActor in
+            let service = CustomEndpointService(modelID: "", apiKey: key, baseURL: base)
+            switch await service.fetchModelIDs() {
+            case .success(let ids):
+                loadedModels = ids
+                if ids.isEmpty { loadError = "The server didn't list any models." }
+            case .failure(let error):
+                loadedModels = []
+                loadError = [error.errorDescription, error.recoverySuggestion].compactMap { $0 }.joined(separator: " ")
+            }
+            isLoadingModels = false
         }
     }
 
@@ -406,9 +601,34 @@ private struct ProviderRow: View {
         return "That doesn't look like a \(hint)… key."
     }
 
-    private var modelBinding: Binding<String> {
-        Binding(get: { settings.modelID(for: provider) },
-                set: { settings.setModelID($0, for: provider) })
+    private static let otherTag = "__other__"
+
+    /// True while "Other…" is chosen or the saved id isn't in the catalog.
+    private var showsOtherField: Bool { pickedOther || settings.usesCustomModelID(for: provider) }
+
+    private var modelChoice: Binding<String> {
+        Binding(
+            get: {
+                showsOtherField ? Self.otherTag : settings.modelID(for: provider)
+            },
+            set: { choice in
+                if choice == Self.otherTag {
+                    pickedOther = true
+                    otherDraft = settings.usesCustomModelID(for: provider) ? settings.modelID(for: provider) : ""
+                    DispatchQueue.main.async { otherFieldFocused = true }
+                } else {
+                    pickedOther = false
+                    settings.setModelID(choice, for: provider)
+                }
+            })
+    }
+
+    private func commitOtherModel() {
+        let id = otherDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        settings.setModelID(id, for: provider)
+        // Typing a catalog id by hand is the same as picking it.
+        if provider.model(withID: id) != nil { pickedOther = false }
     }
 
     /// First 12 characters + bullets + last 4 — enough to recognise, never enough to use.
@@ -446,21 +666,22 @@ private struct ProviderRow: View {
 
     private func test() {
         let key = effectiveKey
-        guard !key.isEmpty else { return }
+        guard !key.isEmpty || !provider.needsAPIKey else { return }
 
         testTask?.cancel()
         testState = .testing
 
         testTask = Task { @MainActor in
             let modelID = settings.modelID(for: provider)
-            let service = AIServiceFactory.service(for: provider, apiKey: key, modelID: modelID)
+            let service = AIServiceFactory.service(for: provider, apiKey: key, modelID: modelID,
+                                                   baseURL: settings.customEndpointURL)
             let result = await service.validateKey()
             if Task.isCancelled { return }
 
             switch result {
             case .success:
                 testState = .verified
-                settings.setAPIKey(key, for: provider)
+                if !key.isEmpty { settings.setAPIKey(key, for: provider) }
                 isEditingKey = false
                 draft = ""
                 try? await Task.sleep(for: .seconds(2))
@@ -468,6 +689,9 @@ private struct ProviderRow: View {
             case .failure(let error):
                 if case .offline = error {
                     testState = .offline
+                } else if case .endpointUnreachable = error {
+                    testState = .invalid([error.errorDescription, error.recoverySuggestion]
+                        .compactMap { $0 }.joined(separator: " "))
                 } else {
                     // Never silently delete a key that failed — it may be a transient outage.
                     testState = .invalid(error.recoverySuggestion ?? error.errorDescription ?? "That key was rejected.")

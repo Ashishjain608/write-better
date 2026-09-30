@@ -23,24 +23,15 @@ nonisolated struct AnthropicService: AIService {
 
     // MARK: Request building
 
-    /// Models whose default is to think before answering. Rewriting is a
-    /// latency-sensitive, non-reasoning task, so we switch it off explicitly.
-    /// Haiku 4.5 predates the parameter and does not think unless asked, so it
-    /// is deliberately absent.
-    /// Models where `thinking: {"type": "disabled"}` is both accepted and safe.
-    ///
-    /// Opus 5 is deliberately absent. It accepts the parameter (at effort `high` or
-    /// below), but with thinking off it can leak `<thinking>` tags into the visible
-    /// response — and our visible response goes straight onto the user's clipboard.
-    /// Opus 5 gets low effort instead: thinking stays on, depth stays minimal.
-    /// Haiku 4.5 is absent for a different reason — it predates the parameter, so
-    /// omitting `thinking` is already "off" and `effort` would 400.
-    private static let modelsSupportingDisabledThinking: Set<String> = [
-        "claude-sonnet-5", "claude-opus-4-8", "claude-sonnet-4-6",
-    ]
-
-    /// Models that take `output_config.effort` instead of disabled thinking.
-    private static let modelsUsingLowEffort: Set<String> = ["claude-opus-5"]
+    /// Models that think by default and can't be told to stop: Sonnet 5.5 rejects
+    /// `thinking: {"type": "disabled"}` and Opus 5.5 rejects it at every effort (both 400).
+    /// A rewrite is latency-sensitive and tool-less, so they get adaptive thinking at
+    /// `output_config.effort: "low"`, which the migration guide recommends over
+    /// `thinking: {"type": "between_tools"}` (Sonnet 5.5 only, restricted fields, effort
+    /// <= high). Adaptive keeps reasoning in separate `thinking` blocks, which `decode`
+    /// drops, so nothing but the rewrite reaches the user's clipboard. Haiku 4.5 predates
+    /// both parameters and is deliberately absent: omitting them already means "no thinking".
+    private static let modelsUsingLowEffort: Set<String> = ["claude-sonnet-5-5", "claude-opus-5-5"]
 
     func buildRequest(_ improvement: ImprovementRequest, stream: Bool) throws -> URLRequest {
         var request = URLRequest(url: Self.messagesURL)
@@ -58,9 +49,7 @@ nonisolated struct AnthropicService: AIService {
                 ["role": "user", "content": improvement.userPrompt],
             ],
         ]
-        if Self.modelsSupportingDisabledThinking.contains(modelID) {
-            body["thinking"] = ["type": "disabled"]
-        } else if Self.modelsUsingLowEffort.contains(modelID) {
+        if Self.modelsUsingLowEffort.contains(modelID) {
             body["output_config"] = ["effort": "low"]
         }
 
@@ -71,33 +60,15 @@ nonisolated struct AnthropicService: AIService {
     // MARK: Streaming
 
     func improveTextStream(request improvement: ImprovementRequest) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
-                    guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
-
-                    let urlRequest = try buildRequest(improvement, stream: true)
-                    let emitted = try await HTTPStream.run(
-                        urlRequest,
-                        decode: Self.decode(event:),
-                        mapHTTPError: Self.mapHTTPError,
-                        onText: { continuation.yield($0) }
-                    )
-                    if !emitted {
-                        throw AIServiceError.api("Claude returned no text. Try again or pick a different model.")
-                    }
-                    continuation.finish()
-                } catch {
-                    if HTTPStream.isCancellation(error) {
-                        continuation.finish()
-                    } else {
-                        continuation.finish(throwing: HTTPStream.transportError(error))
-                    }
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        HTTPStream.textStream(
+            emptyMessage: "Claude returned no text. Try again or pick a different model.",
+            prepare: {
+                guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
+                guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
+                return try buildRequest(improvement, stream: true)
+            },
+            decode: Self.decode(event:),
+            mapHTTPError: Self.mapHTTPError)
     }
 
     // MARK: Key validation
@@ -126,8 +97,6 @@ nonisolated struct AnthropicService: AIService {
     static func decode(event: SSEEvent) throws -> StreamOutcome {
         let payload = event.data.trimmingCharacters(in: .whitespaces)
         guard !payload.isEmpty else { return .ignore }
-        // Not part of the Messages spec, but harmless to honour if a proxy adds it.
-        if payload == "[DONE]" { return .done }
         guard let data = payload.data(using: .utf8),
               let json = HTTPStream.json(data) else { return .ignore }
 
@@ -142,11 +111,16 @@ nonisolated struct AnthropicService: AIService {
             return .ignore
 
         case "message_delta":
-            if let delta = json["delta"] as? [String: Any],
-               (delta["stop_reason"] as? String) == "refusal" {
+            switch ((json["delta"] as? [String: Any])?["stop_reason"] as? String) ?? "" {
+            case "refusal":
+                // Includes a refusal after partial output: the caller keeps what arrived
+                // on screen but the request fails, so it is never offered as a result.
                 throw AIServiceError.api("Claude declined to rewrite this text.")
+            case "max_tokens", "model_context_window_exceeded":
+                return .truncated
+            default:
+                return .ignore
             }
-            return .ignore
 
         case "message_stop":
             return .done

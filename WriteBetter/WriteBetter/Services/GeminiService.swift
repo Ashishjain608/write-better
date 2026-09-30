@@ -23,35 +23,56 @@ nonisolated struct GeminiService: AIService {
 
     static let apiBase = "https://generativelanguage.googleapis.com/v1beta/models"
 
+    /// The id as one safe path segment: a hand-typed id may carry a `models/` prefix
+    /// (as the Gemini docs list them) or characters that aren't valid in a URL.
+    static func pathSegment(_ modelID: String) -> String {
+        var id = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if id.hasPrefix("models/") { id.removeFirst("models/".count) }
+        return id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)?
+            .replacingOccurrences(of: "/", with: "%2F") ?? id
+    }
+
     static func streamURL(modelID: String) -> URL {
-        URL(string: "\(apiBase)/\(modelID):streamGenerateContent?alt=sse")!
+        URL(string: "\(apiBase)/\(pathSegment(modelID)):streamGenerateContent?alt=sse")
+            ?? URL(string: apiBase)!
     }
 
     static func modelURL(modelID: String) -> URL {
-        URL(string: "\(apiBase)/\(modelID)")!
+        URL(string: "\(apiBase)/\(pathSegment(modelID))") ?? URL(string: apiBase)!
     }
 
     // MARK: Request building
 
+    static func thinkingLevel(for modelID: String) -> String? {
+        switch modelID {
+        case "gemini-3.8-flash", "gemini-3.7-flash": return "low"
+        case "gemini-3.6-flash", "gemini-3.5-flash-lite": return "minimal"
+        default: return nil
+        }
+    }
+
     func buildRequest(_ improvement: ImprovementRequest, stream: Bool) throws -> URLRequest {
         let url = stream ? Self.streamURL(modelID: modelID)
-                         : URL(string: "\(Self.apiBase)/\(modelID):generateContent")!
+                         : URL(string: "\(Self.apiBase)/\(Self.pathSegment(modelID)):generateContent") ?? Self.streamURL(modelID: modelID)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+
+        var generationConfig: [String: Any] = ["maxOutputTokens": Constants.maxOutputTokens]
+        // Thinking can't be turned off on Gemini 3; the lowest accepted level differs per
+        // model ("minimal" is a 400 on 3.8 Flash). Unknown ids (typed via "Other…") get no
+        // thinkingConfig, since the model default is always valid.
+        if let level = Self.thinkingLevel(for: modelID) {
+            generationConfig["thinkingConfig"] = ["thinkingLevel": level]
+        }
 
         let body: [String: Any] = [
             "contents": [
                 ["role": "user", "parts": [["text": improvement.userPrompt]]],
             ],
             "systemInstruction": ["parts": [["text": improvement.systemPrompt]]],
-            "generationConfig": [
-                "maxOutputTokens": Constants.maxOutputTokens,
-                // Every model in our catalog accepts "minimal"; Gemini 3 Flash
-                // cannot turn thinking fully off, and this is the closest setting.
-                "thinkingConfig": ["thinkingLevel": "minimal"],
-            ],
+            "generationConfig": generationConfig,
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
@@ -61,33 +82,15 @@ nonisolated struct GeminiService: AIService {
     // MARK: Streaming
 
     func improveTextStream(request improvement: ImprovementRequest) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
-                    guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
-
-                    let urlRequest = try buildRequest(improvement, stream: true)
-                    let emitted = try await HTTPStream.run(
-                        urlRequest,
-                        decode: Self.decode(event:),
-                        mapHTTPError: Self.mapHTTPError,
-                        onText: { continuation.yield($0) }
-                    )
-                    if !emitted {
-                        throw AIServiceError.api("Gemini returned no text. Try again or pick a different model.")
-                    }
-                    continuation.finish()
-                } catch {
-                    if HTTPStream.isCancellation(error) {
-                        continuation.finish()
-                    } else {
-                        continuation.finish(throwing: HTTPStream.transportError(error))
-                    }
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        HTTPStream.textStream(
+            emptyMessage: "Gemini returned no text. Try again or pick a different model.",
+            prepare: {
+                guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
+                guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
+                return try buildRequest(improvement, stream: true)
+            },
+            decode: Self.decode(event:),
+            mapHTTPError: Self.mapHTTPError)
     }
 
     // MARK: Key validation
@@ -154,7 +157,8 @@ nonisolated struct GeminiService: AIService {
             throw AIServiceError.api("Gemini stopped early (\(reason)) and returned nothing.")
         }
 
-        if finishReason != nil {
+        if let reason = finishReason {
+            if reason == "MAX_TOKENS" { return text.isEmpty ? .truncated : .textThenTruncated(text) }
             return text.isEmpty ? .done : .textThenDone(text)
         }
         return text.isEmpty ? .ignore : .text(text)

@@ -29,13 +29,25 @@ nonisolated struct OpenAIService: AIService {
 
     // MARK: Request building
 
+    /// Lowest reasoning effort each catalog model accepts (per its OpenAI model page):
+    /// Terra and Luna take "none"; GPT-6.1 Sol rejects "none" and "minimal", so "low".
+    /// An id we don't know (typed via "Other…") gets no `reasoning` field: the API
+    /// default is always valid, whereas a wrong effort is a 400.
+    static func reasoningEffort(for modelID: String) -> String? {
+        switch modelID {
+        case "gpt-5.6-terra", "gpt-6-luna": return "none"
+        case "gpt-6.1-sol": return "low"
+        default: return nil
+        }
+    }
+
     func buildRequest(_ improvement: ImprovementRequest, stream: Bool) throws -> URLRequest {
         var request = URLRequest(url: Self.responsesURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "authorization")
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": modelID,
             "instructions": improvement.systemPrompt,
             "input": improvement.userPrompt,
@@ -43,10 +55,12 @@ nonisolated struct OpenAIService: AIService {
             // Don't leave the user's text sitting in OpenAI's response store.
             "store": false,
             "max_output_tokens": Constants.maxOutputTokens,
-            // Rewriting needs no deliberation; "none" is OpenAI's own
-            // recommendation for latency-critical work.
-            "reasoning": ["effort": "none"],
         ]
+        // Rewriting needs no deliberation, but the lowest accepted effort differs per
+        // model (and non-reasoning models reject the field), so it is set per model.
+        if let effort = Self.reasoningEffort(for: modelID) {
+            body["reasoning"] = ["effort": effort]
+        }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return request
@@ -55,33 +69,15 @@ nonisolated struct OpenAIService: AIService {
     // MARK: Streaming
 
     func improveTextStream(request improvement: ImprovementRequest) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
-                    guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
-
-                    let urlRequest = try buildRequest(improvement, stream: true)
-                    let emitted = try await HTTPStream.run(
-                        urlRequest,
-                        decode: Self.decode(event:),
-                        mapHTTPError: Self.mapHTTPError,
-                        onText: { continuation.yield($0) }
-                    )
-                    if !emitted {
-                        throw AIServiceError.api("The model returned no text. Try again or pick a different model.")
-                    }
-                    continuation.finish()
-                } catch {
-                    if HTTPStream.isCancellation(error) {
-                        continuation.finish()
-                    } else {
-                        continuation.finish(throwing: HTTPStream.transportError(error))
-                    }
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        HTTPStream.textStream(
+            emptyMessage: "The model returned no text. Try again or pick a different model.",
+            prepare: {
+                guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
+                guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
+                return try buildRequest(improvement, stream: true)
+            },
+            decode: Self.decode(event:),
+            mapHTTPError: Self.mapHTTPError)
     }
 
     // MARK: Key validation
@@ -123,8 +119,13 @@ nonisolated struct OpenAIService: AIService {
             return .done
 
         case "response.incomplete":
-            // Truncated by max_output_tokens: keep what we streamed.
-            return .done
+            let response = json["response"] as? [String: Any]
+            let reason = (response?["incomplete_details"] as? [String: Any])?["reason"] as? String
+            if reason == "content_filter" {
+                throw AIServiceError.api("OpenAI's content filter stopped this rewrite.")
+            }
+            // max_output_tokens: what streamed is a prefix of the answer, not the answer.
+            return .truncated
 
         case "response.failed":
             let response = json["response"] as? [String: Any]

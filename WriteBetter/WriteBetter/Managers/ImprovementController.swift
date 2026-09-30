@@ -66,6 +66,10 @@ final class ImprovementController: ObservableObject {
     @Published private(set) var activeAction: QuickAction?
     @Published private(set) var retryCountdown: Int?
     @Published private(set) var lastOutcomeMessage: String?
+    /// Set when the provider's answer stopped short (output limit, or the stream just
+    /// ended). The partial text stays copyable but is never offered for Replace. The
+    /// panel then sits in `.cancelled`, the phase that already offers Copy and Redo only.
+    @Published private(set) var cutOffError: AIServiceError?
 
     /// The custom-instruction field (C11).
     @Published var customPrompt: String = ""
@@ -114,9 +118,13 @@ final class ImprovementController: ObservableObject {
 
     var selectedProvider: AIProvider { settings.selectedProvider }
 
+    /// The active model. A hand-typed id ("Other…", or a custom endpoint's model)
+    /// isn't in the catalog, so it is described by its own id.
     var selectedModel: AIModelOption? {
-        let id = settings.modelID(for: settings.selectedProvider)
-        return settings.selectedProvider.models.first { $0.id == id }
+        let provider = settings.selectedProvider
+        let id = settings.modelID(for: provider)
+        if let known = provider.model(withID: id) { return known }
+        return id.isEmpty ? nil : AIModelOption(id: id, name: id, blurb: "Custom model id")
     }
 
     var configuredProviders: [AIProvider] {
@@ -125,7 +133,27 @@ final class ImprovementController: ObservableObject {
 
     var canCycleProviders: Bool { configuredProviders.count >= 2 }
 
-    var canReplaceInPlace: Bool { replaceService.canReplace }
+    /// The result is finished and complete, and so is what it was made from: `.done`
+    /// (never mid-stream, stopped, cut off or failed), and the input was not shortened
+    /// to the capture limit. Replacing anything less would overwrite the user's text
+    /// with a fragment.
+    var isResultReplaceable: Bool { replaceabilityBlocker == nil }
+
+    /// Replace would work: the result is replaceable and Accessibility is granted.
+    var canReplaceInPlace: Bool { isResultReplaceable && replaceService.canReplace }
+
+    var wasCutOff: Bool { cutOffError != nil }
+
+    /// Human-readable reason Replace is unavailable for the *result* (not for lack of
+    /// Accessibility access); `nil` when the result is replaceable.
+    var replaceabilityBlocker: String? {
+        guard case .done = phase else { return "Replace works once the result is finished." }
+        guard hasResult else { return "There is no result to paste." }
+        if wasTruncated {
+            return "Only the first 20,000 characters were rewritten, so Replace is off. Copy the result instead."
+        }
+        return nil
+    }
 
     var hasResult: Bool { !resultText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -158,9 +186,11 @@ final class ImprovementController: ObservableObject {
         inlineKeyError = nil
         lastOutcomeMessage = nil
         resetResult()
+        settings.refreshProviderAvailability()
 
-        // §9.4: fix the blocking problem first — no key beats no text.
-        if !settings.isConfigured {
+        // §9.4: fix the blocking problem first — no key beats no text. An unreadable
+        // key (Keychain locked) is not "no key": let the run report that instead.
+        if !settings.isConfigured && !settings.keyIsUnreadable(settings.selectedProvider) {
             phase = .needsKey(settings.selectedProvider)
             return
         }
@@ -316,6 +346,16 @@ final class ImprovementController: ObservableObject {
         flushNow()
         streamTask = nil
 
+        // Cut off mid-answer: keep the partial text, but as a stopped result, not a
+        // finished one. With nothing received it is an ordinary failure.
+        if case .cutOff = error, hasResult {
+            cutOffError = error
+            phase = .cancelled
+            lastOutcomeMessage = error.errorDescription
+            onAnnounce("\(error.errorDescription ?? "Cut off.") You can still copy it.")
+            return
+        }
+
         if Self.isKeyProblem(error) {
             inlineKeyDraft = ""
             inlineKeyError = nil
@@ -336,6 +376,7 @@ final class ImprovementController: ObservableObject {
         flushScheduled = false
         resultText = ""
         displayText = ""
+        cutOffError = nil
     }
 
     // MARK: - Rate-limit countdown (§7.1 rate-limited state)
@@ -438,8 +479,11 @@ final class ImprovementController: ObservableObject {
         if settings.configuredProviders.contains(provider) {
             settings.selectedProvider = provider
             regenerate()
-        } else {
+        } else if provider.needsAPIKey {
             phase = .needsKey(provider)
+        } else {
+            // No key to paste here: a server address needs the Settings form.
+            onOpenSettings(provider)
         }
     }
 
@@ -461,7 +505,11 @@ final class ImprovementController: ObservableObject {
     /// `⌘↩` — paste back into the source app, or fall back to the clipboard and
     /// say which one happened.
     func replaceInPlace() {
-        guard hasResult else { return }
+        if let blocker = replaceabilityBlocker {
+            lastOutcomeMessage = blocker
+            onAnnounce(blocker)
+            return
+        }
         let outcome = replaceService.replace(resultText) { [weak self] in
             self?.onClose()
         }

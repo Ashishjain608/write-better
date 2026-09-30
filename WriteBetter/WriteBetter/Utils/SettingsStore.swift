@@ -14,6 +14,7 @@ final class SettingsStore: ObservableObject {
     private enum Key {
         static let selectedProvider = "selectedProvider"
         static let modelIDs = "modelIDsByProvider"
+        static let customBaseURL = "customEndpointBaseURL"
         static let autoCaptureSelection = "autoCaptureSelection"
         static let launchAtLogin = "launchAtLogin"
         static let didMigrateLegacyKey = "didMigrateLegacyAnthropicKey"
@@ -28,8 +29,28 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Providers that currently hold a usable key.
+    /// Providers that are ready to run: a key (Anthropic, OpenAI, Gemini) or a base URL
+    /// (custom endpoint).
     @Published private(set) var configuredProviders: Set<AIProvider> = []
+
+    /// Base URL of the custom OpenAI-compatible endpoint, as typed.
+    @Published var customBaseURL: String {
+        didSet {
+            guard customBaseURL != oldValue else { return }
+            defaults.set(customBaseURL, forKey: Key.customBaseURL)
+            recomputeConfiguredProviders()
+        }
+    }
+
+    /// Providers whose saved key the Keychain would not hand over (locked, or access
+    /// denied). Distinct from "no key": a key probably exists, so the UI must not say
+    /// there isn't one.
+    @Published private(set) var unreadableKeys: Set<AIProvider> = []
+
+    func keyIsUnreadable(_ provider: AIProvider) -> Bool { unreadableKeys.contains(provider) }
+
+    /// The normalized custom endpoint, or `nil` when unset or malformed.
+    var customEndpointURL: URL? { CustomEndpointService.normalizedBaseURL(customBaseURL) }
 
     /// Grab the current selection automatically when the popup opens.
     @Published var autoCaptureSelection: Bool {
@@ -65,11 +86,19 @@ final class SettingsStore: ObservableObject {
         self.keychainService = keychainService ?? Constants.keychainService
 
         let storedProvider = defaults.string(forKey: Key.selectedProvider)
-        self.selectedProvider = storedProvider.flatMap(AIProvider.init(rawValue:)) ?? .anthropic
+        // A stored Apple choice is dropped when Apple Intelligence is no longer available.
+        self.selectedProvider = storedProvider.flatMap(AIProvider.init(rawValue:))
+            .flatMap { AIProvider.allCases.contains($0) ? $0 : nil } ?? .anthropic
+        self.customBaseURL = defaults.string(forKey: Key.customBaseURL) ?? ""
         self.modelIDs = defaults.dictionary(forKey: Key.modelIDs) as? [String: String] ?? [:]
         self.autoCaptureSelection = defaults.bool(forKey: Key.autoCaptureSelection)
         self.launchAtLogin = defaults.bool(forKey: Key.launchAtLogin)
 
+        #if DEBUG
+        // `--self-check` never needs real keys, and reading the user's Keychain item from
+        // a freshly built (differently signed) binary blocks on an access prompt.
+        if CommandLine.arguments.contains("--self-check") && keychainService == nil { return }
+        #endif
         migrateLegacyAnthropicKeyIfNeeded()
         refreshKeyCache()
     }
@@ -87,9 +116,11 @@ final class SettingsStore: ObservableObject {
         if trimmed.isEmpty {
             Keychain.delete(service: keychainService, account: provider.rawValue)
             keyCache[provider] = nil
+            unreadableKeys.remove(provider)
         } else {
             let ok = Keychain.write(trimmed, service: keychainService, account: provider.rawValue)
             if ok {
+                unreadableKeys.remove(provider)
                 keyCache[provider] = trimmed
             } else {
                 // Keychain refused the write — do not pretend it stuck.
@@ -103,37 +134,80 @@ final class SettingsStore: ObservableObject {
         !apiKey(for: provider).isEmpty
     }
 
-    /// The selected provider has a usable key.
-    var isConfigured: Bool { hasKey(for: selectedProvider) }
+    /// The selected provider is ready to run.
+    var isConfigured: Bool { isUsable(selectedProvider) }
+
+    /// Ready to run: has the key it needs, or the address it needs.
+    func isUsable(_ provider: AIProvider) -> Bool {
+        switch provider {
+        case .anthropic, .openai, .gemini: return hasKey(for: provider)
+        case .custom: return customEndpointURL != nil
+        case .apple: return AppleIntelligence.isAvailable
+        }
+    }
 
     // MARK: Model selection
 
-    /// Persisted model for a provider; falls back to `provider.models[0].id`
-    /// (also when a previously stored id has been retired from the catalog).
+    /// Persisted model for a provider. Any non-empty id is honoured, including one
+    /// typed via "Other…" that isn't in the curated catalog, so a stale catalog can
+    /// never strand a user. Ids from earlier catalogs are remapped to their successor.
     func modelID(for provider: AIProvider) -> String {
-        guard let stored = modelIDs[provider.rawValue],
-              provider.model(withID: stored) != nil
-        else { return provider.defaultModelID }
-        return stored
+        guard let stored = modelIDs[provider.rawValue], !stored.isEmpty else {
+            return provider.defaultModelID
+        }
+        return AIProvider.retiredModelIDs[stored] ?? stored
+    }
+
+    /// Whether the effective model is a hand-typed id rather than a catalog entry.
+    func usesCustomModelID(for provider: AIProvider) -> Bool {
+        provider.model(withID: modelID(for: provider)) == nil
     }
 
     func setModelID(_ id: String, for provider: AIProvider) {
-        guard provider.model(withID: id) != nil else { return }
-        modelIDs[provider.rawValue] = id
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        modelIDs[provider.rawValue] = trimmed
         defaults.set(modelIDs, forKey: Key.modelIDs)
         objectWillChange.send()
+    }
+
+    /// Re-reads things that can change without a Settings edit, such as Apple
+    /// Intelligence finishing its model download. Cheap; call when a screen appears.
+    func refreshProviderAvailability() {
+        recomputeConfiguredProviders()
+        if !AIProvider.allCases.contains(selectedProvider) { selectedProvider = .anthropic }
     }
 
     // MARK: Internals
 
     private func recomputeConfiguredProviders() {
-        configuredProviders = Set(AIProvider.allCases.filter { !(keyCache[$0] ?? "").isEmpty })
+        configuredProviders = Set(AIProvider.allCases.filter(isUsable))
     }
 
     private func refreshKeyCache() {
-        for provider in AIProvider.allCases {
-            keyCache[provider] = Keychain.read(service: keychainService, account: provider.rawValue)
+        for provider in AIProvider.allCases where provider != .apple {
+            readKey(for: provider)
         }
+        recomputeConfiguredProviders()
+    }
+
+    private func readKey(for provider: AIProvider) {
+        switch Keychain.readResult(service: keychainService, account: provider.rawValue) {
+        case .found(let key):
+            keyCache[provider] = key
+            unreadableKeys.remove(provider)
+        case .notFound:
+            keyCache[provider] = nil
+            unreadableKeys.remove(provider)
+        case .failure:
+            keyCache[provider] = nil
+            unreadableKeys.insert(provider)
+        }
+    }
+
+    /// Asks the Keychain again, e.g. after the user unlocked it.
+    func retryKeychainRead(for provider: AIProvider) {
+        readKey(for: provider)
         recomputeConfiguredProviders()
     }
 
@@ -149,8 +223,13 @@ final class SettingsStore: ObservableObject {
             return
         }
 
-        let existing = Keychain.read(service: keychainService, account: AIProvider.anthropic.rawValue)
-        if existing == nil {
+        switch Keychain.readResult(service: keychainService, account: AIProvider.anthropic.rawValue) {
+        case .failure:
+            // Can't tell whether a key is already saved; don't risk overwriting it.
+            return
+        case .found:
+            break
+        case .notFound:
             guard Keychain.write(legacy,
                                  service: keychainService,
                                  account: AIProvider.anthropic.rawValue) else {

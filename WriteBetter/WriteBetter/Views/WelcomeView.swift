@@ -49,7 +49,9 @@ struct WelcomeView: View {
         .frame(width: 560, height: 620)
         .glassSurface(cornerRadius: Theme.Radius.panel)
         .onAppear {
-            chosenProvider = settings.configuredProviders.first ?? settings.selectedProvider
+            let keyed = settings.configuredProviders.first { $0.needsAPIKey }
+            settings.refreshProviderAvailability()
+            chosenProvider = keyed ?? (settings.selectedProvider.needsAPIKey ? settings.selectedProvider : .anthropic)
             sample.load(text: sampleText)
             accessibility.beginPolling()
         }
@@ -80,7 +82,7 @@ struct WelcomeView: View {
         VStack(alignment: .leading, spacing: Theme.Space.lg) {
             StepHeader(index: 1, title: "Pick a provider")
             HStack(spacing: Theme.Space.lg) {
-                ForEach(AIProvider.allCases) { provider in
+                ForEach(AIProvider.allCases.filter(\.needsAPIKey)) { provider in
                     Button {
                         chosenProvider = provider
                         settings.selectedProvider = provider
@@ -106,6 +108,54 @@ struct WelcomeView: View {
                     .accessibilityAddTraits(chosenProvider == provider ? [.isSelected] : [])
                 }
             }
+            otherWaysIn
+        }
+    }
+
+    /// Under the tiles: the non-key ways in.
+    private var otherWaysIn: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            if AppleIntelligence.isAvailable { appleOption }
+            customServerLink
+        }
+    }
+
+    /// Offered only where Apple Intelligence can run: free, no key, nothing to paste.
+    private var appleOption: some View {
+        Button {
+            chosenProvider = .apple
+            settings.selectedProvider = .apple
+            verification = .idle
+            keyDraft = ""
+        } label: {
+            HStack(spacing: Theme.Space.md) {
+                Image(systemName: AIProvider.apple.iconSymbol)
+                    .foregroundStyle(AIProvider.apple.accent)
+                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                    Text("Use Apple's on-device model").textStyle(.label)
+                    Text("Free, no key, stays on your Mac").textStyle(.caption)
+                }
+                Spacer(minLength: 0)
+                if chosenProvider == .apple {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.Color.success)
+                }
+            }
+            .padding(Theme.Space.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(WelcomeTileStyle(isSelected: chosenProvider == .apple))
+        .accessibilityLabel("Use Apple's on-device model. Free, no key.")
+        .accessibilityAddTraits(chosenProvider == .apple ? [.isSelected] : [])
+    }
+
+    private var customServerLink: some View {
+        HStack(spacing: Theme.Space.md) {
+            Text("Running Ollama, LM Studio or OpenRouter?").textStyle(.caption)
+            Button("Set up a custom server") { SettingsRouter.shared.open(provider: .custom) }
+                .buttonStyle(.link)
+                .textStyle(.caption)
+                .foregroundStyle(Theme.Color.accentText)
+            Spacer(minLength: 0)
         }
     }
 
@@ -113,8 +163,19 @@ struct WelcomeView: View {
 
     private var blockTwo: some View {
         VStack(alignment: .leading, spacing: Theme.Space.lg) {
-            StepHeader(index: 2, title: "Paste your key")
+            StepHeader(index: 2, title: activeProvider.needsAPIKey ? "Paste your key" : "No key needed")
 
+            if !activeProvider.needsAPIKey {
+                Text("\(activeProvider.displayName) runs on your Mac. Go straight to step 3.")
+                    .textStyle(.caption)
+            }
+
+            if activeProvider.needsAPIKey { keyRow }
+        }
+    }
+
+    private var keyRow: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.lg) {
             HStack(spacing: Theme.Space.lg) {
                 SecureField(activeProvider.keyPlaceholder, text: $keyDraft)
                     .textFieldStyle(.plain)
@@ -282,7 +343,7 @@ struct WelcomeView: View {
     private var activeProvider: AIProvider { chosenProvider ?? settings.selectedProvider }
 
     private var isConfigured: Bool {
-        verification.isVerified || settings.hasKey(for: activeProvider)
+        verification.isVerified || settings.isUsable(activeProvider)
     }
 
     private func verifyKey() {

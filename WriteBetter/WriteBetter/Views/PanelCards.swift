@@ -135,6 +135,31 @@ private struct UpdatesFrequently: ViewModifier {
     }
 }
 
+// MARK: - Cut-off notice
+
+/// Shown with a partial result the provider stopped short of finishing. The text stays
+/// copyable; the wording says why Replace is gone so the missing button isn't a mystery.
+struct CutOffNotice: View {
+    let error: AIServiceError
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                Text(error.errorDescription ?? "The result was cut off.")
+                    .textStyle(.label)
+                if let suggestion = error.recoverySuggestion {
+                    Text(suggestion).textStyle(.caption)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "scissors")
+        }
+        .foregroundStyle(Theme.Color.warning)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - Error card (§7.1)
 
 /// Fills the result canvas. Renders `errorDescription` then `recoverySuggestion` —
@@ -266,10 +291,10 @@ struct SetupCard: View {
                             Image(systemName: provider.iconSymbol)
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(provider.accent)
-                            Text(provider.displayName)
+                            Text(provider.shortName)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.75)
-                            if configured.contains(provider) {
+                            if configured.contains(provider) && provider.needsAPIKey {
                                 Image(systemName: "key.fill")
                                     .font(.system(size: 9, weight: .semibold))
                                     .foregroundStyle(Theme.Color.success)
@@ -279,12 +304,21 @@ struct SetupCard: View {
                     }
                     .buttonStyle(ChipButtonStyle(isSelected: provider == selected))
                     .accessibilityLabel(provider.displayName)
-                    .accessibilityHint(configured.contains(provider) ? "Key saved" : "Needs an API key")
+                    .accessibilityHint(configured.contains(provider)
+                                       ? (provider.needsAPIKey ? "Key saved" : "Ready")
+                                       : (provider.needsAPIKey ? "Needs an API key" : "Set up in Settings"))
                     .accessibilityAddTraits(provider == selected ? [.isSelected] : [])
                 }
             }
 
-            InlineKeyField(provider: selected, key: $key, isValidating: isValidating, onSubmit: onSubmit)
+            if selected.needsAPIKey {
+                InlineKeyField(provider: selected, key: $key, isValidating: isValidating, onSubmit: onSubmit)
+            } else {
+                // No key to paste: a server address is entered in Settings → Providers.
+                Text("\(selected.displayName) is set up in Settings → Providers (⌘,).")
+                    .textStyle(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle.fill")
@@ -293,11 +327,13 @@ struct SetupCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.md) {
-                Text("Stored in your Mac's Keychain. Never leaves your device.")
-                    .textStyle(.caption)
-                Spacer(minLength: Theme.Space.md)
-                ConsoleLink(provider: selected)
+            if selected.needsAPIKey {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.md) {
+                    Text("Stored in your Mac's Keychain. Never leaves your device.")
+                        .textStyle(.caption)
+                    Spacer(minLength: Theme.Space.md)
+                    ConsoleLink(provider: selected)
+                }
             }
         }
         .padding(14)
@@ -417,6 +453,13 @@ struct SourceStrip: View {
     .padding(Theme.Space.xl)
     .frame(width: 560)
     .background(Theme.Color.surface)
+}
+
+#Preview("Cut-off notice") {
+    CutOffNotice(error: .cutOff(hitLimit: true))
+        .padding(Theme.Space.xl)
+        .frame(width: 560)
+        .background(Theme.Color.surface)
 }
 
 #Preview("Setup card — no API key") {
