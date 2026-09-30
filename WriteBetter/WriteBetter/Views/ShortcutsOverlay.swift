@@ -4,6 +4,7 @@ import SwiftUI
 /// discover the whole map without leaving the app or reading documentation (§10).
 struct ShortcutsOverlay: View {
     @Binding var isPresented: Bool
+    @ObservedObject var customActions: CustomActionStore = .shared
 
     /// Built from `QuickAction.allCases`, so the ⌘1…⌘n row is always accurate.
     private var rows: [(String, String)] {
@@ -21,6 +22,9 @@ struct ShortcutsOverlay: View {
         if actionCount > 0 {
             let range = actionCount == 1 ? "⌘1" : "⌘1…⌘\(min(actionCount, 9))"
             entries.append((range, "Run a quick action"))
+        }
+        if let range = CustomAction.shortcutRange(count: customActions.actions.count) {
+            entries.append((range, "Run a saved action"))
         }
         entries.append(("⌘] / ⌘[", "Next / previous configured provider"))
         entries.append(("⌘,", "Open Settings"))

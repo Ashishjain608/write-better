@@ -54,6 +54,7 @@ nonisolated enum WriteBetterSelfCheck {
         checkOpenAIStream(report)
         checkGeminiStream(report)
         checkErrorMapping(report)
+        checkCustomActions(report)
 
         if report.failures.isEmpty {
             print("[WriteBetterSelfCheck] \(report.passed) checks passed.")
@@ -660,6 +661,44 @@ nonisolated enum WriteBetterSelfCheck {
         } catch {
             return (text, error as? AIServiceError ?? .api(error.localizedDescription))
         }
+    }
+
+    // MARK: Custom actions
+
+    private static func checkCustomActions(_ report: Report) {
+        MainActor.assumeIsolated {
+            let suite = "writebetter.selfcheck.actions"
+            let defaults = UserDefaults(suiteName: suite)!
+            defaults.removePersistentDomain(forName: suite)
+            defer { defaults.removePersistentDomain(forName: suite) }
+
+            let store = CustomActionStore(defaults: defaults)
+            report.check("custom actions start empty", store.actions.isEmpty)
+            for n in 1...CustomAction.maxCount {
+                report.check("custom action \(n) accepted",
+                             store.add(CustomAction(name: "A\(n)", instruction: "Do \(n)", icon: n == 1 ? "star" : nil)))
+            }
+            report.check("custom action cap rejects the next", !store.add(CustomAction(name: "X", instruction: "x")))
+            report.equal("custom action count at cap", store.actions.count, CustomAction.maxCount)
+
+            let reloaded = CustomActionStore(defaults: defaults)
+            report.check("custom actions Codable round-trip", reloaded.actions == store.actions)
+
+            store.move(at: 0, by: 1)
+            report.equal("custom action reorder", store.actions.first?.name, "A2")
+            store.remove(id: store.actions[0].id)
+            report.equal("custom action remove frees a slot", store.actions.count, CustomAction.maxCount - 1)
+
+            defaults.set(Data("not json".utf8), forKey: CustomActionStore.defaultsKey)
+            report.check("corrupt custom actions read as empty", CustomActionStore(defaults: defaults).actions.isEmpty)
+        }
+        report.equal("shortcut digit of first custom action", CustomAction.shortcutDigit(at: 0), 6)
+        report.equal("shortcut digit of last custom action", CustomAction.shortcutDigit(at: 3), 9)
+        report.check("no shortcut past the cap", CustomAction.shortcutDigit(at: 4) == nil)
+        report.equal("shortcut range for two", CustomAction.shortcutRange(count: 2), "⌘6–⌘7")
+        report.check("no shortcut range when empty", CustomAction.shortcutRange(count: 0) == nil)
+        report.check("suggested name fits the limit",
+                     CustomAction.suggestedName(for: "translate this into formal business Spanish please").count <= CustomAction.nameLimit)
     }
 }
 #endif

@@ -10,12 +10,13 @@ final class SettingsRouter: ObservableObject {
     static let shared = SettingsRouter()
 
     enum Tab: String, CaseIterable, Identifiable {
-        case providers, general, about
+        case providers, actions, general, about
         var id: String { rawValue }
 
         var title: String {
             switch self {
             case .providers: return "Providers"
+            case .actions:   return "Actions"
             case .general:   return "General"
             case .about:     return "About"
             }
@@ -24,6 +25,7 @@ final class SettingsRouter: ObservableObject {
         var icon: String {
             switch self {
             case .providers: return "key.fill"
+            case .actions:   return "bolt"
             case .general:   return "gearshape"
             case .about:     return "info.circle"
             }
