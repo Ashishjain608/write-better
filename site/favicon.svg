@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="100 100 824 824"><!-- "Caret Ascend", small-size rendition: tile + caret (118 wide) + bar, no spark. Geometry from docs/design-brief.md §2.2. -->
+<defs>
+<linearGradient id="t" x1="152" y1="100" x2="872" y2="924" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1B1F3D"/><stop offset=".42" stop-color="#0E1226"/><stop offset="1" stop-color="#05060E"/></linearGradient>
+<radialGradient id="g" cx="512" cy="430" r="470" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#7C6BFF" stop-opacity=".42"/><stop offset="1" stop-color="#7C6BFF" stop-opacity="0"/></radialGradient>
+<linearGradient id="c" x1="296" y1="388" x2="728" y2="604" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFF"/><stop offset=".55" stop-color="#EDEBFF"/><stop offset="1" stop-color="#B9AEFF"/></linearGradient>
+<linearGradient id="b" x1="330" y1="720" x2="694" y2="720" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#7C6BFF"/><stop offset="1" stop-color="#37D3E8"/></linearGradient>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#t)"/>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#g)"/>
+<path d="M296 604 512 388 728 604" fill="none" stroke="url(#c)" stroke-width="118" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="330" y="686" width="364" height="68" rx="34" fill="url(#b)"/>
+</svg>
