@@ -8,13 +8,15 @@ project itself.
 ## 1. Get it building
 
 ```bash
-git clone https://github.com/ashishjain/write-better.git
+git clone https://github.com/Ashishjain608/write-better.git
 cd write-better
 open WriteBetter/WriteBetter.xcodeproj
 ```
 
-Xcode 16+. Nothing to install: **zero third-party dependencies**, no package
-manager, no `.env` file, no generated code. Press `⌘R`.
+Xcode 26+ (the app uses the macOS 26 SDK; the deployment target is 14). One
+dependency, **Sparkle 2** (auto-update), pinned to an exact version as a Swift
+Package that Xcode resolves on first open. No `.env` file, no generated code.
+Press `⌘R`.
 
 There is no API key in the repo and none is needed to build. Keys are entered in
 the app's Settings window at runtime and stored in the macOS Keychain
@@ -28,20 +30,23 @@ first launch and deletes it.
 ```
 write-better/
 ├── create-dmg.sh                    build + sign + package + verify, one command
+├── .github/workflows/               ci.yml (build + self-check), release.yml (tag → DMG → appcast)
+├── packaging/homebrew/writebetter.rb  cask for the personal tap
 ├── scripts/
+│   ├── make-appcast.sh              signs the DMG and writes appcast.xml (CI only)
+│   ├── dmg-requirements.txt         hash-pinned dmgbuild
 │   ├── artwork.swift                every raster asset, from one set of geometry
 │   ├── make-icons.sh                regenerates Assets.xcassets
 │   ├── dmg_settings.py              dmgbuild layout for the installer window
 │   └── verify_dmg.py                asserts the built DMG's .DS_Store is correct
 └── WriteBetter/
-    ├── ExportOptions.plist          for `xcodebuild -exportArchive`, if you use it
     ├── WriteBetter.xcodeproj
     └── WriteBetter/
         ├── Info.plist               the real one — see §3
         ├── WriteBetter.entitlements
         ├── Assets.xcassets/         generated; do not hand-edit
         ├── WriteBetterApp.swift
-        ├── Managers/                hotkey, capture, replace, accessibility
+        ├── Managers/                hotkey, capture, replace, accessibility, Updater (Sparkle)
         ├── Models/                  QuickAction, ImprovementRequest
         ├── Services/                one client per provider + the SSE plumbing
         ├── Utils/                   AIProvider, SettingsStore, Keychain
@@ -77,10 +82,14 @@ Keys that matter:
 | `LSMinimumSystemVersion` | `$(MACOSX_DEPLOYMENT_TARGET)` = **14.0**. |
 | `LSApplicationCategoryType` | `public.app-category.productivity`. |
 | `NSAccessibilityUsageDescription` | Shown when the user opts into auto-capture or Replace. Written to be honest that both are optional. |
-| `NSAppleEventsUsageDescription` | Replace-in-place hands the improved text back to the app you came from. Missing this string terminates a hardened-runtime app the first time it tries. |
+| `SUFeedURL` | `https://github.com/Ashishjain608/write-better/releases/latest/download/appcast.xml`: a release asset, so it always points at the newest non-prerelease. |
+| `SUPublicEDKey` | Public half of the Sparkle EdDSA key. Every update DMG is verified against it. |
+| `SUEnableAutomaticChecks` | Default on; users can turn it off in About. |
 
 `WriteBetter.entitlements` is deliberately tiny: sandbox **off**, network client
-**on**, Apple Events **on**. Nothing else.
+**on**. Nothing else. There is no Apple Events entitlement or usage string:
+Replace-in-place uses `NSRunningApplication.activate` and `CGEvent.post`, and
+neither sends Apple Events.
 
 The app **must stay unsandboxed**. Inside the sandbox `AXIsProcessTrusted()`
 always returns false and the Accessibility prompt never appears, so auto-capture
@@ -129,7 +138,7 @@ size and icon coordinates are duplicated in exactly two places —
 ```bash
 ./create-dmg.sh                          # build from source, then package
 ./create-dmg.sh --app /path/to/App.app   # package an existing bundle
-./create-dmg.sh --output /tmp/out.dmg
+./create-dmg.sh --output /tmp/out.dmg   # default: dist/WriteBetter.dmg
 ./create-dmg.sh --offline                # never touch the network for tooling
 ```
 
@@ -142,21 +151,30 @@ What it does, in order:
 1. Looks for a `Developer ID Application` identity and picks a mode.
 2. Builds (or copies) the app into `build/stage/`. Your original is never
    touched.
-3. Signs inside-out — nested code first, outer bundle last. Never
+3. Signs inside-out — Sparkle's XPC services, `Autoupdate` and `Updater.app`,
+   then the framework, then the app, all with `--options runtime --timestamp`
+   and the identity chosen by SHA-1 hash. Never
    `codesign --deep`; per TN2206 that is for emergency repairs, not for signing
    something you intend to ship. `--deep` is used only for *verification*.
 4. Fails hard if the signed bundle carries `get-task-allow`.
-5. Notarizes and staples, if there is an identity *and* credentials.
+5. Notarizes and staples, if there is an identity *and* credentials. It reads
+   `notarytool`'s JSON and requires `Accepted` (`submit --wait` exits 0 even on
+   `Invalid`); otherwise it prints Apple's log and fails. Credentials, first
+   match wins: `WRITEBETTER_NOTARY_PROFILE` (keychain profile);
+   `WRITEBETTER_NOTARY_APPLE_ID` + `_PASSWORD` (app-specific) + `_TEAM_ID`;
+   `WRITEBETTER_NOTARY_KEY` + `_KEY_ID` + `_ISSUER` (API key).
 6. Generates the background art and volume icon. The Gatekeeper warning is drawn
    into the background **only** when the build is not notarized, so the art can
    never lie about the build it ships with.
-7. Builds the DMG with **`dmgbuild`**, installed into `build/.venv` (gitignored,
-   so your global site-packages are left alone). dmgbuild writes the `.DS_Store`
+7. Builds the DMG with **`dmgbuild`**, installed into `build/.venv` from the
+   hash-pinned `scripts/dmg-requirements.txt` (gitignored venv, so your global
+   site-packages are left alone). dmgbuild writes the `.DS_Store`
    and alias records directly and never talks to Finder — no AppleScript, no
    Automation/TCC prompt, none of the `hdiutil detach: Resource busy` races that
    every Finder-driving tool has open issues for.
-8. Signs and staples the DMG itself, when in Developer ID mode.
-9. Mounts the result and runs `scripts/verify_dmg.py`, which reads the
+8. Signs, notarizes and staples the DMG itself, when in Developer ID mode.
+9. In Developer ID mode, `spctl` on the app and DMG and `stapler validate` are
+   fatal. Then mounts the result and runs `scripts/verify_dmg.py`, which reads the
    `.DS_Store` back and asserts the window size, hidden chrome, icon size, both
    icon positions and the background reference actually took. A DMG that
    *mounts* proves nothing; this proves the layout.
@@ -174,11 +192,71 @@ Everything lands in `build/` and `dist/`, both gitignored.
   has no signature to check, and it trains users to double-click exactly the
   thing they should not. Plain drag-to-Applications is both safer and the
   convention for this class of app.
-- **No Sparkle.** Auto-update costs EdDSA key custody, an appcast to host and an
-  extra signed framework to nest. Not worth it until there is a release cadence
-  to automate. GitHub Releases is enough.
 
-## 7. Troubleshooting
+## 7. Releasing and auto-update
+
+Releases are cut by pushing a tag; `.github/workflows/release.yml` does the rest.
+
+```bash
+# bump MARKETING_VERSION and CURRENT_PROJECT_VERSION (Sparkle compares the build number)
+git tag v1.2.0 && git push origin v1.2.0
+```
+
+The workflow refuses a tag that disagrees with `MARKETING_VERSION`, builds,
+signs, notarizes and staples the app and the DMG, and creates the GitHub Release
+with `WriteBetter.dmg` (stable name, what the website links) and
+`WriteBetter-1.2.0.dmg`. Tags containing `-` (`v1.2.0-rc.1`) are prereleases:
+same build, **no appcast**, so nobody is auto-updated to them. Try any change to
+signing with an `rc` tag first.
+
+For non-prerelease tags it also uploads `appcast.xml` (one item, EdDSA-signed by
+`scripts/make-appcast.sh`). Sparkle in installed apps reads
+`releases/latest/download/appcast.xml`, which GitHub resolves to the newest
+non-prerelease.
+
+### Repository secrets
+
+Same names as the sibling Notes & Goals app, so the values can be copied.
+
+| Secret | What |
+|---|---|
+| `APPLE_CERTIFICATE` | base64 of the Developer ID Application `.p12` (`base64 -i cert.p12 \| pbcopy`) |
+| `APPLE_CERTIFICATE_PASSWORD` | the `.p12` export password |
+| `APPLE_SIGNING_IDENTITY` | the certificate name or SHA-1 hash (`security find-identity -v -p codesigning`) |
+| `APPLE_ID` | Apple ID email used for notarization |
+| `APPLE_PASSWORD` | app-specific password for that Apple ID |
+| `APPLE_TEAM_ID` | `ZC7J54L64J` |
+| `SPARKLE_ED_PRIVATE_KEY` | Sparkle EdDSA private key (below) |
+
+The Sparkle private key was generated with Sparkle's `generate_keys` and lives in
+the maintainer's login keychain. Never commit or paste it. To set the secret:
+
+```bash
+generate_keys -x /tmp/sparkle.key      # from build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/
+gh secret set SPARKLE_ED_PRIVATE_KEY -R Ashishjain608/write-better < /tmp/sparkle.key
+rm -P /tmp/sparkle.key
+```
+
+Losing this key means existing installs can never verify another update: back it
+up somewhere private (a password manager), not in the repo.
+
+### Homebrew
+
+`packaging/homebrew/writebetter.rb` is a cask for a personal tap. One-time setup:
+
+```bash
+gh repo create Ashishjain608/homebrew-tap --public
+git clone https://github.com/Ashishjain608/homebrew-tap && cd homebrew-tap
+mkdir -p Casks && cp ../write-better/packaging/homebrew/writebetter.rb Casks/
+# set sha256 to: shasum -a 256 WriteBetter-1.1.0.dmg
+git add . && git commit -m "Add writebetter cask" && git push
+brew install --cask ashishjain608/tap/writebetter
+```
+
+Each release: bump `version` and `sha256` in the tap. `auto_updates true` tells
+brew that Sparkle handles upgrades in the app.
+
+## 8. Troubleshooting
 
 **"WriteBetter is damaged and can't be opened"** — the build is not notarized.
 System Settings → Privacy & Security → Security → Open Anyway. See README.
