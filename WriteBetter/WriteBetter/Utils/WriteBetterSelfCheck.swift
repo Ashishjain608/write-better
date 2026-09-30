@@ -62,6 +62,8 @@ nonisolated enum WriteBetterSelfCheck {
         checkGeminiStream(report)
         checkErrorMapping(report)
         checkCustomActions(report)
+        // Called from the app delegate on the main thread, so this is safe.
+        report.failures += MainActor.assumeIsolated { PasteboardSnapshotCheck.run() }
 
         if report.failures.isEmpty {
             print("[WriteBetterSelfCheck] \(report.passed) checks passed.")
