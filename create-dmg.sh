@@ -32,12 +32,16 @@ STAGE_DIR="$BUILD_DIR/stage"
 ART_DIR="$BUILD_DIR/art"
 VENV_DIR="$BUILD_DIR/.venv"
 
-DMG_OUT="$REPO_ROOT/dist/${APP_NAME}-Installer.dmg"
+DMG_OUT="$REPO_ROOT/dist/${APP_NAME}.dmg"
 MOUNT_POINT=""
 
 # Notarization credentials. Either a stored keychain profile:
 #   xcrun notarytool store-credentials WriteBetterNotary --key … --key-id … --issuer …
 #   export WRITEBETTER_NOTARY_PROFILE=WriteBetterNotary
+# or an Apple ID + app-specific password (what CI uses):
+#   export WRITEBETTER_NOTARY_APPLE_ID=you@example.com
+#   export WRITEBETTER_NOTARY_PASSWORD=<app-specific password>
+#   export WRITEBETTER_NOTARY_TEAM_ID=ZC7J54L64J
 # or a raw App Store Connect API key:
 #   export WRITEBETTER_NOTARY_KEY=/path/AuthKey_XXXX.p8
 #   export WRITEBETTER_NOTARY_KEY_ID=XXXXXXXXXX
@@ -46,6 +50,13 @@ NOTARY_PROFILE="${WRITEBETTER_NOTARY_PROFILE:-}"
 NOTARY_KEY="${WRITEBETTER_NOTARY_KEY:-}"
 NOTARY_KEY_ID="${WRITEBETTER_NOTARY_KEY_ID:-}"
 NOTARY_ISSUER="${WRITEBETTER_NOTARY_ISSUER:-}"
+NOTARY_APPLE_ID="${WRITEBETTER_NOTARY_APPLE_ID:-}"
+NOTARY_PASSWORD="${WRITEBETTER_NOTARY_PASSWORD:-}"
+NOTARY_TEAM_ID="${WRITEBETTER_NOTARY_TEAM_ID:-}"
+
+# Optional: pin the signing identity by SHA-1 hash (`security find-identity -v
+# -p codesigning`). Names become ambiguous after a certificate renewal.
+SIGN_HASH="${WRITEBETTER_SIGN_IDENTITY:-}"
 
 PREBUILT_APP=""
 SKIP_NOTARIZE=0
@@ -95,8 +106,11 @@ Usage: ./create-dmg.sh [options]
   --app <path>            Package this .app instead of compiling one. Lets the
                           packaging stage be exercised while the sources are
                           mid-rewrite.
-  --output <path>         Where to write the DMG (default: dist/${APP_NAME}-Installer.dmg)
+  --output <path>         Where to write the DMG (default: dist/${APP_NAME}.dmg)
   --notary-profile <name> notarytool keychain profile to use.
+  --apple-id <id> --password <app-specific> --team-id <team>
+                          Notarize with an Apple ID instead (prefer the
+                          WRITEBETTER_NOTARY_* env vars: argv is visible in ps).
   --no-notarize           Sign with Developer ID but skip notarization.
   --offline               Do not touch the network for tooling; if the venv is
                           missing, go straight to the unstyled fallback.
@@ -109,6 +123,9 @@ while [ $# -gt 0 ]; do
     --app)            PREBUILT_APP="${2:?--app needs a path}"; shift 2 ;;
     --output)         DMG_OUT="${2:?--output needs a path}"; shift 2 ;;
     --notary-profile) NOTARY_PROFILE="${2:?--notary-profile needs a name}"; shift 2 ;;
+    --apple-id)       NOTARY_APPLE_ID="${2:?--apple-id needs a value}"; shift 2 ;;
+    --password)       NOTARY_PASSWORD="${2:?--password needs a value}"; shift 2 ;;
+    --team-id)        NOTARY_TEAM_ID="${2:?--team-id needs a value}"; shift 2 ;;
     --no-notarize)    SKIP_NOTARIZE=1; shift ;;
     --offline)        OFFLINE=1; shift ;;
     -h|--help)        usage; exit 0 ;;
@@ -122,12 +139,17 @@ done
 
 step "Checking for a Developer ID signing identity"
 
-SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-  | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.+)".*/\1/' || true)"
+# Sign by SHA-1 hash, never by name: after a renewal two certificates share the
+# same name and codesign refuses with "ambiguous".
+IDENT_LINE="$(security find-identity -v -p codesigning 2>/dev/null \
+  | grep 'Developer ID Application' \
+  | { if [ -n "$SIGN_HASH" ]; then grep -i "$SIGN_HASH" || true; else head -1; fi; } || true)"
+SIGN_IDENTITY="$(printf '%s' "$IDENT_LINE" | awk '{print $2}')"
+SIGN_LABEL="$(printf '%s' "$IDENT_LINE" | sed -E 's/.*"(.+)".*/\1/')"
 
 if [ -n "$SIGN_IDENTITY" ]; then
   MODE="developer-id"
-  good "found: $SIGN_IDENTITY"
+  good "found: $SIGN_LABEL ($SIGN_IDENTITY)"
 else
   MODE="adhoc"
   banner <<'EOF'
@@ -185,29 +207,42 @@ step "Signing the app"
 
 # Inside-out: nested code first, outer bundle last. TN2206 is explicit that
 # `codesign --deep` is for emergency repairs, not for signing a shippable app.
+# Sparkle's documented order (sparkle-project.org/documentation): its XPC
+# services, then Autoupdate and Updater.app, then the framework, then the app.
+# Order is derived from depth: anything deeper is signed first.
 NESTED=()
 while IFS= read -r item; do NESTED+=("$item"); done < <(
-  find "$APP_PATH/Contents/Frameworks" "$APP_PATH/Contents/XPCServices" \
-       "$APP_PATH/Contents/Library" \
-       -maxdepth 2 \( -name '*.framework' -o -name '*.xpc' -o -name '*.app' -o -name '*.dylib' \) \
-       2>/dev/null || true
+  find "$APP_PATH/Contents" -mindepth 2 \
+       \( -name '*.xpc' -o -name '*.app' -o -name '*.framework' -o -name '*.dylib' \
+          -o -path '*/Sparkle.framework/Versions/*/Autoupdate' \) \
+       -not -path '*/Versions/Current/*' -not -type l 2>/dev/null \
+    | awk -F/ '{print NF, $0}' | sort -rn | cut -d' ' -f2-
 )
 
+sign_one() {
+  # Sparkle's XPC services (Downloader needs network-client) keep the
+  # entitlements they were built with, per Sparkle's signing guidance.
+  local extra=()
+  case "$1" in *.xpc) extra=(--preserve-metadata=entitlements) ;; esac
+  if [ "$MODE" = "developer-id" ]; then
+    codesign --force --options runtime --timestamp ${extra[@]+"${extra[@]}"} --sign "$SIGN_IDENTITY" "$1"
+  else
+    codesign --force --options runtime ${extra[@]+"${extra[@]}"} --sign - "$1"
+  fi
+}
+
+for item in "${NESTED[@]:-}"; do
+  [ -n "$item" ] || continue
+  info "nested: ${item#"$APP_PATH"/Contents/}"
+  sign_one "$item"
+done
+
 if [ "$MODE" = "developer-id" ]; then
-  for item in "${NESTED[@]:-}"; do
-    [ -n "$item" ] || continue
-    info "nested: $(basename "$item")"
-    codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$item"
-  done
   codesign --force --options runtime --timestamp \
     --entitlements "$ENTITLEMENTS" \
     --sign "$SIGN_IDENTITY" "$APP_PATH"
-  good "signed with $SIGN_IDENTITY (hardened runtime + secure timestamp)"
+  good "signed with $SIGN_LABEL (hardened runtime + secure timestamp)"
 else
-  for item in "${NESTED[@]:-}"; do
-    [ -n "$item" ] || continue
-    codesign --force --options runtime --sign - "$item"
-  done
   codesign --force --options runtime \
     --entitlements "$ENTITLEMENTS" \
     --sign - "$APP_PATH"
@@ -230,9 +265,27 @@ good "no get-task-allow in the shipped signature"
 notarytool_auth() {
   if [ -n "$NOTARY_PROFILE" ]; then
     printf '%s\n' --keychain-profile "$NOTARY_PROFILE"
+  elif [ -n "$NOTARY_APPLE_ID" ] && [ -n "$NOTARY_PASSWORD" ] && [ -n "$NOTARY_TEAM_ID" ]; then
+    printf '%s\n' --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID"
   elif [ -n "$NOTARY_KEY" ] && [ -n "$NOTARY_KEY_ID" ] && [ -n "$NOTARY_ISSUER" ]; then
     printf '%s\n' --key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER"
   fi
+}
+
+# `notarytool submit --wait` exits 0 even when Apple returns Invalid, so read the
+# JSON status and require "Accepted"; otherwise print Apple's log and fail.
+notarize() {
+  local file="$1" out status id
+  out="$(xcrun notarytool submit "$file" "${AUTH[@]}" --wait --output-format json)" \
+    || { printf '%s\n' "$out" >&2; fail "notarytool submit failed for $(basename "$file")"; }
+  status="$(printf '%s' "$out" | plutil -extract status raw -o - - 2>/dev/null || true)"
+  id="$(printf '%s' "$out" | plutil -extract id raw -o - - 2>/dev/null || true)"
+  if [ "$status" != "Accepted" ]; then
+    warn "notarization of $(basename "$file") ended with status: ${status:-unknown}"
+    [ -n "$id" ] && xcrun notarytool log "$id" "${AUTH[@]}" >&2 || true
+    fail "notarization was not Accepted"
+  fi
+  good "Apple accepted $(basename "$file") (submission $id)"
 }
 
 NOTARIZED=0
@@ -242,14 +295,15 @@ if [ "$MODE" = "developer-id" ] && [ "$SKIP_NOTARIZE" -eq 0 ]; then
 
   if [ "${#AUTH[@]}" -eq 0 ]; then
     warn "Developer ID found but no notarization credentials."
-    warn "Set WRITEBETTER_NOTARY_PROFILE, or WRITEBETTER_NOTARY_KEY/_KEY_ID/_ISSUER."
+    warn "Set WRITEBETTER_NOTARY_PROFILE, WRITEBETTER_NOTARY_APPLE_ID/_PASSWORD/_TEAM_ID,"
+    warn "or WRITEBETTER_NOTARY_KEY/_KEY_ID/_ISSUER."
     warn "Shipping signed-but-not-notarized: Gatekeeper will still block it."
   else
     step "Notarizing the app"
     ZIP="$BUILD_DIR/$APP_NAME-notarize.zip"
     rm -f "$ZIP"
     ditto -c -k --keepParent "$APP_PATH" "$ZIP"
-    xcrun notarytool submit "$ZIP" "${AUTH[@]}" --wait
+    notarize "$ZIP"
     xcrun stapler staple "$APP_PATH"
     rm -f "$ZIP"
     NOTARIZED=1
@@ -294,7 +348,8 @@ ensure_dmgbuild() {
   step "Installing dmgbuild into $VENV_DIR"
   note "a local venv, so the machine's global site-packages are left alone"
   python3 -m venv "$VENV_DIR" >/dev/null 2>&1 || return 1
-  "$VENV_DIR/bin/pip" install --quiet --disable-pip-version-check dmgbuild >/dev/null 2>&1 || return 1
+  "$VENV_DIR/bin/pip" install --quiet --disable-pip-version-check --require-hashes \
+    -r "$REPO_ROOT/scripts/dmg-requirements.txt" >/dev/null 2>&1 || return 1
   [ -x "$VENV_DIR/bin/dmgbuild" ]
 }
 
@@ -321,7 +376,7 @@ disk image. It is a plain hdiutil DMG: functional, but it looks
 unfinished, and this is NOT what you should publish.
 
 Fix: run this script again with a network connection, or
-  python3 -m venv build/.venv && build/.venv/bin/pip install dmgbuild
+  python3 -m venv build/.venv && build/.venv/bin/pip install --require-hashes -r scripts/dmg-requirements.txt
 EOF
   FALLBACK_STAGE="$BUILD_DIR/fallback"
   rm -rf "$FALLBACK_STAGE"
@@ -363,7 +418,7 @@ if [ "$MODE" = "developer-id" ]; then
   if [ "$NOTARIZED" -eq 1 ]; then
     AUTH=()
     while IFS= read -r arg; do [ -n "$arg" ] && AUTH+=("$arg"); done < <(notarytool_auth)
-    xcrun notarytool submit "$DMG_OUT" "${AUTH[@]}" --wait
+    notarize "$DMG_OUT"
     xcrun stapler staple "$DMG_OUT"
     good "DMG notarized and stapled — offline Gatekeeper checks will pass"
   fi
@@ -375,12 +430,21 @@ fi
 
 step "Verifying"
 
-info "spctl assessment of the app:"
-spctl -a -vvv -t exec "$APP_PATH" 2>&1 | sed 's/^/      /' || true
-
 if [ "$MODE" = "developer-id" ]; then
+  # Fatal: a build Gatekeeper rejects must never reach a release.
+  info "spctl assessment of the app:"
+  spctl -a -vvv -t exec "$APP_PATH" 2>&1 | sed 's/^/      /'
+  [ "${PIPESTATUS[0]}" -eq 0 ] || fail "Gatekeeper rejects the app"
   info "spctl assessment of the disk image:"
-  spctl -a -vvv -t open --context context:primary-signature "$DMG_OUT" 2>&1 | sed 's/^/      /' || true
+  spctl -a -vvv -t open --context context:primary-signature "$DMG_OUT" 2>&1 | sed 's/^/      /'
+  [ "${PIPESTATUS[0]}" -eq 0 ] || fail "Gatekeeper rejects the disk image"
+  if [ "$NOTARIZED" -eq 1 ]; then
+    xcrun stapler validate "$APP_PATH" >/dev/null || fail "app has no valid stapled ticket"
+    xcrun stapler validate "$DMG_OUT" >/dev/null || fail "DMG has no valid stapled ticket"
+    good "stapled tickets validate"
+  fi
+else
+  note "ad-hoc build: skipping the Gatekeeper assessment (it would reject by design)"
 fi
 
 MOUNT_POINT="$BUILD_DIR/verify-mount"
