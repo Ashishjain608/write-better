@@ -1,5 +1,8 @@
 #if DEBUG
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 /// Offline self-check for the provider layer.
 ///
@@ -51,6 +54,7 @@ nonisolated enum WriteBetterSelfCheck {
         checkGeminiRequest(report)
         checkModelCatalogs(report)
         checkCustomEndpoint(report)
+        checkAppleOnDevice(report)
         checkSSEParser(report)
         checkAnthropicStream(report)
         checkOpenAIStream(report)
@@ -527,6 +531,48 @@ nonisolated enum WriteBetterSelfCheck {
         }
     }
 
+    // MARK: Apple on-device
+
+    private static func checkAppleOnDevice(_ report: Report) {
+        report.equal("apple has one catalog model", AIProvider.apple.models.count, 1)
+        report.check("apple needs no key", !AIProvider.apple.needsAPIKey)
+        report.check("apple is offered only when it is available",
+                     AIProvider.allCases.contains(.apple) == AppleIntelligence.isAvailable)
+        report.check("apple availability always carries a reason when unavailable", {
+            if case .unavailable(let reason) = AppleIntelligence.availability { return !reason.isEmpty }
+            return true
+        }())
+        report.check("Apple's missing-provider error reads sensibly",
+                     (AIServiceError.missingKey(.apple).errorDescription ?? "").contains("on-device"))
+
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            // Cumulative snapshots → appended fragments.
+            var delta = AppleOnDeviceService.Delta()
+            var out = ""
+            for snapshot in ["We", "We were", "We were", "We were going", "We were going."] {
+                if let fragment = delta.next(snapshot) { out += fragment }
+            }
+            report.equal("apple snapshots become deltas", out, "We were going.")
+            report.check("apple clean stream does not diverge", !delta.diverged)
+
+            // A rewritten prefix can't be un-sent: withheld and flagged.
+            var rewritten = AppleOnDeviceService.Delta()
+            _ = rewritten.next("We was")
+            let withheld = rewritten.next("We were going")
+            report.check("apple divergence is withheld and flagged", withheld == nil && rewritten.diverged)
+
+            report.raised("apple context overflow maps to a clear message",
+                          AppleOnDeviceService.map(LanguageModelSession.GenerationError.exceededContextWindowSize(
+                            .init(debugDescription: "test"))),
+                          .api("Selection too long for the on-device model. Select less text, or pick another provider."))
+            report.check("apple guardrail violation maps to a message",
+                         AppleOnDeviceService.map(LanguageModelSession.GenerationError.guardrailViolation(
+                            .init(debugDescription: "test"))) != .api("The on-device model couldn't complete this. Try again."))
+        }
+        #endif
+    }
+
     // MARK: SSE framing
 
     private static func checkSSEParser(_ report: Report) {
@@ -879,6 +925,13 @@ nonisolated enum WriteBetterSelfCheck {
             service = endpoint
             modelsProbe = endpoint
             text = args[3...].joined(separator: " ")
+        case "apple":
+            guard args.count >= 2, let apple = AppleIntelligence.makeService() else {
+                say("apple: unavailable (\(AppleIntelligence.availability))"); return false
+            }
+            say("availability: \(AppleIntelligence.availability)")
+            service = apple
+            text = args[1...].joined(separator: " ")
         default:
             say("unknown provider \(kind)"); return false
         }

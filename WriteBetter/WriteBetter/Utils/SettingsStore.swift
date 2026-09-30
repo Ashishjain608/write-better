@@ -79,7 +79,9 @@ final class SettingsStore: ObservableObject {
         self.keychainService = keychainService ?? Constants.keychainService
 
         let storedProvider = defaults.string(forKey: Key.selectedProvider)
-        self.selectedProvider = storedProvider.flatMap(AIProvider.init(rawValue:)) ?? .anthropic
+        // A stored Apple choice is dropped when Apple Intelligence is no longer available.
+        self.selectedProvider = storedProvider.flatMap(AIProvider.init(rawValue:))
+            .flatMap { AIProvider.allCases.contains($0) ? $0 : nil } ?? .anthropic
         self.customBaseURL = defaults.string(forKey: Key.customBaseURL) ?? ""
         self.modelIDs = defaults.dictionary(forKey: Key.modelIDs) as? [String: String] ?? [:]
         self.autoCaptureSelection = defaults.bool(forKey: Key.autoCaptureSelection)
@@ -131,6 +133,7 @@ final class SettingsStore: ObservableObject {
         switch provider {
         case .anthropic, .openai, .gemini: return hasKey(for: provider)
         case .custom: return customEndpointURL != nil
+        case .apple: return AppleIntelligence.isAvailable
         }
     }
 
@@ -159,6 +162,13 @@ final class SettingsStore: ObservableObject {
         objectWillChange.send()
     }
 
+    /// Re-reads things that can change without a Settings edit, such as Apple
+    /// Intelligence finishing its model download. Cheap; call when a screen appears.
+    func refreshProviderAvailability() {
+        recomputeConfiguredProviders()
+        if !AIProvider.allCases.contains(selectedProvider) { selectedProvider = .anthropic }
+    }
+
     // MARK: Internals
 
     private func recomputeConfiguredProviders() {
@@ -166,7 +176,7 @@ final class SettingsStore: ObservableObject {
     }
 
     private func refreshKeyCache() {
-        for provider in AIProvider.allCases {
+        for provider in AIProvider.allCases where provider != .apple {
             keyCache[provider] = Keychain.read(service: keychainService, account: provider.rawValue)
         }
         recomputeConfiguredProviders()

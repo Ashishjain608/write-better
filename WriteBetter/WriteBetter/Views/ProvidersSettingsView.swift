@@ -32,10 +32,33 @@ struct ProvidersSettingsView: View {
                 }
             }
 
+            if case .unavailable(let reason) = AppleIntelligence.availability {
+                appleUnavailableNote(reason)
+            }
+
             if let removedKey {
                 undoPill(for: removedKey)
             }
         }
+        .onAppear { settings.refreshProviderAvailability() }
+    }
+
+    /// Apple's on-device model is hidden everywhere it can't run; say why, once, here.
+    private func appleUnavailableNote(_ reason: String) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.lg) {
+            Image(systemName: "cpu")
+                .foregroundStyle(Theme.Color.textTertiary)
+                .font(.system(size: 13, weight: .semibold))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                Text("Apple on-device model unavailable").textStyle(.label)
+                Text(reason).textStyle(.caption).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Theme.Space.lg)
+        .cardSurface()
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Banner
@@ -113,7 +136,8 @@ struct ProvidersSettingsView: View {
     private func statusCaption(for provider: AIProvider) -> some View {
         Group {
             if settings.isUsable(provider) {
-                Label(provider.needsAPIKey ? "key" : "server", systemImage: "checkmark.circle.fill")
+                Label(provider.needsAPIKey ? "key" : (provider == .apple ? "on-device" : "server"),
+                      systemImage: "checkmark.circle.fill")
                     .foregroundStyle(Theme.Color.success)
             } else {
                 Label(provider.needsAPIKey ? "add key" : "add server",
@@ -285,7 +309,7 @@ private struct ProviderRow: View {
             StatusPill(text: "Offline", tint: Theme.Color.warning, systemImage: "wifi.slash")
         case .idle:
             if settings.isUsable(provider) {
-                StatusPill(text: provider.needsAPIKey ? "Key saved" : "Server set",
+                StatusPill(text: provider.needsAPIKey ? "Key saved" : (provider == .apple ? "Ready" : "Server set"),
                            tint: Theme.Color.success, systemImage: "checkmark.circle.fill")
             } else {
                 Text(provider.needsAPIKey ? "No key" : "No server").textStyle(.caption)
@@ -295,7 +319,21 @@ private struct ProviderRow: View {
 
     // MARK: Expanded body
 
+    @ViewBuilder
     private var expandedBody: some View {
+        if provider == .apple {
+            Text("""
+                 Runs on your Mac with Apple Intelligence: free, private, no key and no network. \
+                 The model has a small context window, so it suits short selections best.
+                 """)
+                .textStyle(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            keyedBody
+        }
+    }
+
+    private var keyedBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.lg) {
             if provider == .custom { endpointSection }
 

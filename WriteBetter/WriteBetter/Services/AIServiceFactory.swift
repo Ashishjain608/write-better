@@ -33,9 +33,25 @@ nonisolated enum AIServiceFactory {
             return OpenAIService(modelID: modelID, apiKey: apiKey)
         case .gemini:
             return GeminiService(modelID: modelID, apiKey: apiKey)
+        case .apple:
+            // Callers gate on availability; on a Mac that can't host it the request
+            // fails with the reason instead of crashing.
+            return AppleIntelligence.makeService() ?? UnavailableService(provider: .apple)
         case .custom:
             return CustomEndpointService(modelID: modelID, apiKey: apiKey,
                                          baseURL: baseURL ?? URL(string: CustomEndpointService.presets[0].baseURL)!)
         }
     }
+}
+
+/// Stand-in for a provider that can't run on this Mac. Fails with a plain reason.
+nonisolated private struct UnavailableService: AIService {
+    let provider: AIProvider
+    var modelID: String { "" }
+
+    func improveTextStream(request: ImprovementRequest) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { $0.finish(throwing: AIServiceError.missingKey(provider)) }
+    }
+
+    func validateKey() async -> Result<Void, AIServiceError> { .failure(.missingKey(provider)) }
 }

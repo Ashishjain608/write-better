@@ -51,6 +51,7 @@ nonisolated enum AIServiceError: LocalizedError, Sendable, Equatable {
         case .noProviderConfigured:
             return "WriteBetter isn't set up yet."
         case .missingKey(let provider):
+            if provider == .apple { return "Apple's on-device model isn't available." }
             if !provider.needsAPIKey { return "No server address saved for \(provider.displayName)." }
             return "No \(provider.displayName) API key saved."
         case .invalidKey(let provider):
@@ -88,6 +89,7 @@ nonisolated enum AIServiceError: LocalizedError, Sendable, Equatable {
         case .noProviderConfigured:
             return "Open Settings and add an API key for Anthropic, OpenAI or Google Gemini, or point WriteBetter at a local server."
         case .missingKey(let provider):
+            if provider == .apple { return "Open Settings → Providers to see why." }
             if !provider.needsAPIKey { return "Open Settings and enter the server's base URL." }
             return "Open Settings and paste your \(provider.displayName) key."
         case .invalidKey(let provider):
