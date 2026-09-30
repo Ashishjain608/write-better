@@ -178,7 +178,10 @@ private struct ProviderRow: View {
     @State private var isEditingKey = false
     @State private var testState: TestState = .idle
     @State private var testTask: Task<Void, Never>?
+    @State private var pickedOther = false
+    @State private var otherDraft = ""
     @FocusState private var keyFieldFocused: Bool
+    @FocusState private var otherFieldFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -212,7 +215,10 @@ private struct ProviderRow: View {
             guard isExpanded else { return }
             beginEditing()
         }
-        .onAppear { syncDraft() }
+        .onAppear {
+            syncDraft()
+            if settings.usesCustomModelID(for: provider) { otherDraft = settings.modelID(for: provider) }
+        }
         .onChange(of: isExpanded) { _, expanded in if expanded { syncDraft() } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(provider.displayName)
@@ -329,18 +335,45 @@ private struct ProviderRow: View {
                 }
             }
 
+            modelSection
+        }
+    }
+
+    /// Catalog picker plus an "Other…" entry, so the curated list can never strand a user.
+    private var modelSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
             HStack(spacing: Theme.Space.lg) {
                 Text("Model").textStyle(.caption)
                 Spacer(minLength: Theme.Space.lg)
-                Picker("", selection: modelBinding) {
+                Picker("", selection: modelChoice) {
                     ForEach(provider.models) { model in
                         Text("\(model.name) · \(model.blurb)").tag(model.id)
                     }
+                    Divider()
+                    Text("Other…").tag(Self.otherTag)
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .frame(maxWidth: 260)
                 .accessibilityLabel("\(provider.displayName) model")
+            }
+            if showsOtherField {
+                HStack(spacing: Theme.Space.md) {
+                    TextField("Model id, e.g. \(provider.defaultModelID)", text: $otherDraft)
+                        .textFieldStyle(.plain)
+                        .font(Theme.Font.mono)
+                        .foregroundStyle(Theme.Color.textPrimary)
+                        .focused($otherFieldFocused)
+                        .onSubmit(commitOtherModel)
+                        .onChange(of: otherFieldFocused) { _, focused in if !focused { commitOtherModel() } }
+                        .padding(.horizontal, Theme.Space.lg)
+                        .frame(height: 32)
+                        .sunkenSurface(radius: Theme.Radius.control,
+                                       stroke: otherFieldFocused ? provider.accent.opacity(0.7) : nil)
+                        .accessibilityLabel("\(provider.displayName) model id")
+                }
+                Text("Sent exactly as typed. Newer models may need a newer WriteBetter.")
+                    .textStyle(.caption)
             }
         }
     }
@@ -406,9 +439,34 @@ private struct ProviderRow: View {
         return "That doesn't look like a \(hint)… key."
     }
 
-    private var modelBinding: Binding<String> {
-        Binding(get: { settings.modelID(for: provider) },
-                set: { settings.setModelID($0, for: provider) })
+    private static let otherTag = "__other__"
+
+    /// True while "Other…" is chosen or the saved id isn't in the catalog.
+    private var showsOtherField: Bool { pickedOther || settings.usesCustomModelID(for: provider) }
+
+    private var modelChoice: Binding<String> {
+        Binding(
+            get: {
+                showsOtherField ? Self.otherTag : settings.modelID(for: provider)
+            },
+            set: { choice in
+                if choice == Self.otherTag {
+                    pickedOther = true
+                    otherDraft = settings.usesCustomModelID(for: provider) ? settings.modelID(for: provider) : ""
+                    DispatchQueue.main.async { otherFieldFocused = true }
+                } else {
+                    pickedOther = false
+                    settings.setModelID(choice, for: provider)
+                }
+            })
+    }
+
+    private func commitOtherModel() {
+        let id = otherDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        settings.setModelID(id, for: provider)
+        // Typing a catalog id by hand is the same as picking it.
+        if provider.model(withID: id) != nil { pickedOther = false }
     }
 
     /// First 12 characters + bullets + last 4 — enough to recognise, never enough to use.

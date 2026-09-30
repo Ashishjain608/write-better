@@ -109,20 +109,20 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
                 AIModelOption(id: "gpt-5.6-terra",
                               name: "GPT-5.6 Terra",
                               blurb: "Recommended — best balance"),
-                AIModelOption(id: "gpt-5.6-sol",
-                              name: "GPT-5.6 Sol",
+                AIModelOption(id: "gpt-6.1-sol",
+                              name: "GPT-6.1 Sol",
                               blurb: "Highest quality, slower"),
-                AIModelOption(id: "gpt-5.6-luna",
-                              name: "GPT-5.6 Luna",
+                AIModelOption(id: "gpt-6-luna",
+                              name: "GPT-6 Luna",
                               blurb: "Fastest and cheapest"),
             ]
         case .gemini:
             return [
+                AIModelOption(id: "gemini-3.8-flash",
+                              name: "Gemini 3.8 Flash",
+                              blurb: "Recommended — latest and most capable Flash"),
                 AIModelOption(id: "gemini-3.6-flash",
                               name: "Gemini 3.6 Flash",
-                              blurb: "Recommended — latest and fastest"),
-                AIModelOption(id: "gemini-3.5-flash",
-                              name: "Gemini 3.5 Flash",
                               blurb: "Previous generation, very capable"),
                 AIModelOption(id: "gemini-3.5-flash-lite",
                               name: "Gemini 3.5 Flash-Lite",
@@ -131,10 +131,17 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         }
     }
 
-    /// The id used when nothing has been chosen yet.
-    var defaultModelID: String { models[0].id }
+    /// Ids that shipped in an earlier catalog and no longer exist, with what replaces them.
+    /// A stored choice is remapped instead of being sent to the API and 404ing.
+    static let retiredModelIDs: [String: String] = [
+        "claude-sonnet-5": "claude-sonnet-5-5",
+        "claude-opus-5": "claude-opus-5-5",
+    ]
 
-    /// Looks a stored id back up in the catalog; `nil` if it is no longer offered.
+    /// The id used when nothing has been chosen yet.
+    var defaultModelID: String { models.first?.id ?? "" }
+
+    /// Looks an id up in the curated catalog; `nil` for a hand-typed ("Other…") id.
     func model(withID id: String) -> AIModelOption? {
         models.first { $0.id == id }
     }

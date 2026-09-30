@@ -70,6 +70,11 @@ final class SettingsStore: ObservableObject {
         self.autoCaptureSelection = defaults.bool(forKey: Key.autoCaptureSelection)
         self.launchAtLogin = defaults.bool(forKey: Key.launchAtLogin)
 
+        #if DEBUG
+        // `--self-check` never needs real keys, and reading the user's Keychain item from
+        // a freshly built (differently signed) binary blocks on an access prompt.
+        if CommandLine.arguments.contains("--self-check") && keychainService == nil { return }
+        #endif
         migrateLegacyAnthropicKeyIfNeeded()
         refreshKeyCache()
     }
@@ -108,18 +113,25 @@ final class SettingsStore: ObservableObject {
 
     // MARK: Model selection
 
-    /// Persisted model for a provider; falls back to `provider.models[0].id`
-    /// (also when a previously stored id has been retired from the catalog).
+    /// Persisted model for a provider. Any non-empty id is honoured, including one
+    /// typed via "Other…" that isn't in the curated catalog, so a stale catalog can
+    /// never strand a user. Ids from earlier catalogs are remapped to their successor.
     func modelID(for provider: AIProvider) -> String {
-        guard let stored = modelIDs[provider.rawValue],
-              provider.model(withID: stored) != nil
-        else { return provider.defaultModelID }
-        return stored
+        guard let stored = modelIDs[provider.rawValue], !stored.isEmpty else {
+            return provider.defaultModelID
+        }
+        return AIProvider.retiredModelIDs[stored] ?? stored
+    }
+
+    /// Whether the effective model is a hand-typed id rather than a catalog entry.
+    func usesCustomModelID(for provider: AIProvider) -> Bool {
+        provider.model(withID: modelID(for: provider)) == nil
     }
 
     func setModelID(_ id: String, for provider: AIProvider) {
-        guard provider.model(withID: id) != nil else { return }
-        modelIDs[provider.rawValue] = id
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        modelIDs[provider.rawValue] = trimmed
         defaults.set(modelIDs, forKey: Key.modelIDs)
         objectWillChange.send()
     }

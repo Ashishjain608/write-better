@@ -49,6 +49,7 @@ nonisolated enum WriteBetterSelfCheck {
         checkAnthropicRequest(report)
         checkOpenAIRequest(report)
         checkGeminiRequest(report)
+        checkModelCatalogs(report)
         checkSSEParser(report)
         checkAnthropicStream(report)
         checkOpenAIStream(report)
@@ -298,6 +299,69 @@ nonisolated enum WriteBetterSelfCheck {
         report.equal("gemini body.generationConfig.thinkingConfig.thinkingLevel",
                      (generationConfig["thinkingConfig"] as? [String: Any])?["thinkingLevel"] as? String ?? "",
                      "minimal")
+    }
+
+    // MARK: Catalogs and per-model request config
+
+    private static func checkModelCatalogs(_ report: Report) {
+        let improvement = ImprovementRequest(originalText: sampleText, action: .concise)
+
+        func openAIBody(_ id: String) -> [String: Any] {
+            (try? OpenAIService(modelID: id, apiKey: testKey).buildRequest(improvement, stream: true))
+                .flatMap(\.httpBody).flatMap(HTTPStream.json) ?? [:]
+        }
+        func geminiConfig(_ id: String) -> [String: Any] {
+            let body = (try? GeminiService(modelID: id, apiKey: testKey).buildRequest(improvement, stream: true))
+                .flatMap(\.httpBody).flatMap(HTTPStream.json) ?? [:]
+            return body["generationConfig"] as? [String: Any] ?? [:]
+        }
+        func effort(_ body: [String: Any]) -> String? { (body["reasoning"] as? [String: Any])?["effort"] as? String }
+        func level(_ config: [String: Any]) -> String? {
+            (config["thinkingConfig"] as? [String: Any])?["thinkingLevel"] as? String
+        }
+
+        report.equal("openai Terra reasoning effort", effort(openAIBody("gpt-5.6-terra")) ?? "-", "none")
+        report.equal("openai Luna reasoning effort", effort(openAIBody("gpt-6-luna")) ?? "-", "none")
+        report.equal("openai Sol rejects none, so low", effort(openAIBody("gpt-6.1-sol")) ?? "-", "low")
+        report.check("openai omits reasoning for an unknown id", openAIBody("gpt-4.1")["reasoning"] == nil)
+
+        report.equal("gemini 3.8 Flash thinking level", level(geminiConfig("gemini-3.8-flash")) ?? "-", "low")
+        report.equal("gemini 3.6 Flash thinking level", level(geminiConfig("gemini-3.6-flash")) ?? "-", "minimal")
+        report.equal("gemini Flash-Lite thinking level", level(geminiConfig("gemini-3.5-flash-lite")) ?? "-", "minimal")
+        report.check("gemini omits thinkingConfig for an unknown id",
+                     geminiConfig("gemini-9-ultra")["thinkingConfig"] == nil)
+        report.equal("gemini strips a models/ prefix",
+                     GeminiService.streamURL(modelID: "models/gemini-3.8-flash").absoluteString,
+                     "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse")
+        report.check("gemini survives an id with odd characters",
+                     GeminiService.streamURL(modelID: "a b/c?d").absoluteString.contains("a%20b%2Fc%3Fd"))
+
+        // Every catalog entry is unique and the retired ids all point at a live one.
+        for provider in AIProvider.allCases {
+            let ids = provider.models.map(\.id)
+            report.check("\(provider.rawValue) catalog ids are unique", Set(ids).count == ids.count)
+        }
+        report.check("retired ids remap into the catalog",
+                     AIProvider.retiredModelIDs.values.allSatisfy { AIProvider.anthropic.model(withID: $0) != nil })
+
+        // Settings: an off-catalog id sticks, a retired one is remapped, blank is ignored.
+        MainActor.assumeIsolated {
+            let suite = "com.aj.WriteBetter.selfcheck.catalog"
+            let defaults = UserDefaults(suiteName: suite)!
+            defaults.removePersistentDomain(forName: suite)
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let store = SettingsStore(defaults: defaults, keychainService: "com.aj.WriteBetter.selfcheck")
+            report.equal("default model is catalog[0]",
+                         store.modelID(for: .openai), AIProvider.openai.models[0].id)
+            store.setModelID("  gpt-4.1  ", for: .openai)
+            report.equal("an off-catalog model id is kept, trimmed", store.modelID(for: .openai), "gpt-4.1")
+            report.check("off-catalog id is flagged as custom", store.usesCustomModelID(for: .openai))
+            store.setModelID("   ", for: .openai)
+            report.equal("a blank model id is ignored", store.modelID(for: .openai), "gpt-4.1")
+            store.setModelID("claude-sonnet-5", for: .anthropic)
+            report.equal("a retired model id is remapped",
+                         store.modelID(for: .anthropic), "claude-sonnet-5-5")
+        }
     }
 
     // MARK: SSE framing

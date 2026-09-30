@@ -29,13 +29,25 @@ nonisolated struct OpenAIService: AIService {
 
     // MARK: Request building
 
+    /// Lowest reasoning effort each catalog model accepts (per its OpenAI model page):
+    /// Terra and Luna take "none"; GPT-6.1 Sol rejects "none" and "minimal", so "low".
+    /// An id we don't know (typed via "Other…") gets no `reasoning` field: the API
+    /// default is always valid, whereas a wrong effort is a 400.
+    static func reasoningEffort(for modelID: String) -> String? {
+        switch modelID {
+        case "gpt-5.6-terra", "gpt-6-luna": return "none"
+        case "gpt-6.1-sol": return "low"
+        default: return nil
+        }
+    }
+
     func buildRequest(_ improvement: ImprovementRequest, stream: Bool) throws -> URLRequest {
         var request = URLRequest(url: Self.responsesURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "authorization")
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": modelID,
             "instructions": improvement.systemPrompt,
             "input": improvement.userPrompt,
@@ -43,10 +55,12 @@ nonisolated struct OpenAIService: AIService {
             // Don't leave the user's text sitting in OpenAI's response store.
             "store": false,
             "max_output_tokens": Constants.maxOutputTokens,
-            // Rewriting needs no deliberation; "none" is OpenAI's own
-            // recommendation for latency-critical work.
-            "reasoning": ["effort": "none"],
         ]
+        // Rewriting needs no deliberation, but the lowest accepted effort differs per
+        // model (and non-reasoning models reject the field), so it is set per model.
+        if let effort = Self.reasoningEffort(for: modelID) {
+            body["reasoning"] = ["effort": effort]
+        }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return request
