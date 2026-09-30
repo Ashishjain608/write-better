@@ -4,6 +4,7 @@ import SwiftUI
 /// About tab (§7.2) — the mark, the version, the privacy promise, and a reset.
 struct AboutSettingsView: View {
     @ObservedObject var settings: SettingsStore
+    @ObservedObject private var updater = Updater.shared
 
     @State private var sheet: Sheet?
     @State private var showResetConfirmation = false
@@ -30,6 +31,13 @@ struct AboutSettingsView: View {
             Text(versionString)
                 .textStyle(.caption)
                 .monospacedDigit()
+
+            CheckForUpdatesButton()
+                .buttonStyle(SecondaryButtonStyle())
+
+            Toggle("Automatically check for updates", isOn: $updater.automaticallyChecksForUpdates)
+                .toggleStyle(.checkbox)
+                .textStyle(.caption)
 
             Spacer().frame(height: Theme.Space.lg)
 
@@ -96,6 +104,7 @@ struct AboutSettingsView: View {
                 bullet("Your text is sent to the provider you select, and to nobody else.")
                 bullet("API keys are stored in the macOS Keychain, never in a file and never in a log.")
                 bullet("WriteBetter has no analytics, no telemetry and no account.")
+                bullet("Update checks download a feed from GitHub Releases, at most once a day, and send nothing about you. Turn them off in About.")
                 bullet("Accessibility access is optional, and is used only to read your selection and paste a result back.")
             }
             Spacer(minLength: 0)
