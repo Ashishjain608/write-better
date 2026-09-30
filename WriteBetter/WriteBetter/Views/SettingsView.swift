@@ -19,6 +19,11 @@ struct SettingsView: View {
                                  systemImage: SettingsRouter.Tab.providers.icon) }
                 .tag(SettingsRouter.Tab.providers)
 
+            ActionsSettingsView()
+                .tabItem { Label(SettingsRouter.Tab.actions.title,
+                                 systemImage: SettingsRouter.Tab.actions.icon) }
+                .tag(SettingsRouter.Tab.actions)
+
             GeneralSettingsView(settings: settings)
                 .tabItem { Label(SettingsRouter.Tab.general.title,
                                  systemImage: SettingsRouter.Tab.general.icon) }
