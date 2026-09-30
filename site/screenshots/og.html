@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- Source for og.png (1200×630). Re-render from the repo root with:
+     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --hide-scrollbars \
+       --force-device-scale-factor=1 --window-size=1200,630 \
+       --screenshot=site/screenshots/og.png "file://$PWD/site/screenshots/og.html"
+     Check the output is exactly 1200×630 (some Chrome builds shave the viewport). -->
+<html lang="en">
+<meta charset="utf-8">
+<title>WriteBetter OG card</title>
+<style>
+  *{box-sizing:border-box;margin:0}
+  html,body{width:1200px;height:630px;overflow:hidden}
+  body{position:relative;background:#070910;color:#F2F4F8;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter Tight","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  /* the one light source: violet bloom, aqua at its edge */
+  .bloom{position:absolute;inset:0;
+    background:radial-gradient(520px 420px at 250px 300px,rgba(124,107,255,.42),rgba(124,107,255,0) 70%),
+               radial-gradient(420px 320px at 470px 470px,rgba(55,211,232,.14),rgba(55,211,232,0) 70%)}
+  .grain{position:absolute;inset:0;opacity:.05;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+  .wrap{position:relative;display:flex;align-items:center;gap:64px;height:100%;padding:0 88px}
+  .icon{width:300px;height:300px;flex:none}
+  .name{font-size:88px;font-weight:600;letter-spacing:-.035em;line-height:1}
+  .claim{margin-top:22px;max-width:15em;font-size:44px;font-weight:500;letter-spacing:-.025em;line-height:1.12;color:#A8B0BF}
+  .keys{margin-top:36px;display:flex;align-items:center;gap:10px;font:500 22px ui-monospace,"SF Mono",Menlo,monospace;color:#F2F4F8}
+  kbd{padding:6px 14px;border:1px solid rgba(255,255,255,.18);border-bottom-width:3px;border-radius:8px;background:#0E1118;font:inherit}
+  .keys span{margin-left:14px;font-family:-apple-system,BlinkMacSystemFont,"Inter Tight",sans-serif;font-size:21px;color:#8A93A6}
+  .bar{position:absolute;left:88px;right:88px;bottom:0;height:4px;background:linear-gradient(90deg,#7C6BFF,#37D3E8)}
+</style>
+<body>
+  <div class="bloom"></div><div class="grain"></div>
+  <div class="wrap">
+    <img class="icon" src="../icon.png" alt="">
+    <div>
+      <h1 class="name">WriteBetter</h1>
+      <p class="claim">Rewrite any text on your Mac with the model you choose.</p>
+      <p class="keys"><kbd>⇧⌘Space</kbd><span>Free and open source · macOS 14+</span></p>
+    </div>
+  </div>
+  <div class="bar"></div>
+</body>
+</html>
