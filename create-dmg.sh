@@ -147,6 +147,13 @@ IDENT_LINE="$(security find-identity -v -p codesigning 2>/dev/null \
 SIGN_IDENTITY="$(printf '%s' "$IDENT_LINE" | awk '{print $2}')"
 SIGN_LABEL="$(printf '%s' "$IDENT_LINE" | sed -E 's/.*"(.+)".*/\1/')"
 
+# CI sets this so a missing certificate or credentials can never quietly ship an
+# ad-hoc or un-notarized DMG as a release.
+REQUIRE_RELEASE="${WRITEBETTER_REQUIRE_RELEASE:-0}"
+if [ "$REQUIRE_RELEASE" = "1" ] && [ -z "$SIGN_IDENTITY" ]; then
+  fail "WRITEBETTER_REQUIRE_RELEASE=1 but no Developer ID identity was found"
+fi
+
 if [ -n "$SIGN_IDENTITY" ]; then
   MODE="developer-id"
   good "found: $SIGN_LABEL ($SIGN_IDENTITY)"
@@ -294,6 +301,7 @@ if [ "$MODE" = "developer-id" ] && [ "$SKIP_NOTARIZE" -eq 0 ]; then
   while IFS= read -r arg; do [ -n "$arg" ] && AUTH+=("$arg"); done < <(notarytool_auth)
 
   if [ "${#AUTH[@]}" -eq 0 ]; then
+    [ "$REQUIRE_RELEASE" = "1" ] && fail "WRITEBETTER_REQUIRE_RELEASE=1 but no notarization credentials were given"
     warn "Developer ID found but no notarization credentials."
     warn "Set WRITEBETTER_NOTARY_PROFILE, WRITEBETTER_NOTARY_APPLE_ID/_PASSWORD/_TEAM_ID,"
     warn "or WRITEBETTER_NOTARY_KEY/_KEY_ID/_ISSUER."

@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    # macos-26 (arm64) ships Xcode 26.x; the app needs the macOS 26 SDK for
+    # FoundationModels, while the deployment target stays macOS 14.
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Xcode version
+        run: xcodebuild -version
+
+      - name: Build Debug (unsigned, warnings are errors)
+        run: |
+          xcodebuild -project WriteBetter/WriteBetter.xcodeproj -scheme WriteBetter \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build
+
+      - name: Self-check
+        run: build/DerivedData/Build/Products/Debug/WriteBetter.app/Contents/MacOS/WriteBetter --self-check
+
+      - name: Build Release (unsigned)
+        run: |
+          xcodebuild -project WriteBetter/WriteBetter.xcodeproj -scheme WriteBetter \
+            -configuration Release -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build
