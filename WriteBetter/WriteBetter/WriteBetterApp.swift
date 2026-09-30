@@ -92,6 +92,8 @@ struct MenuBarMenu: View {
             Label("Keyboard Shortcuts…", systemImage: "keyboard")
         }
 
+        CheckForUpdatesButton()
+
         Divider()
 
         Button {
@@ -166,6 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             exit(WriteBetterSelfCheck.runAll() ? 0 : 1)
         }
         #endif
+
+        Updater.shared.start()
 
         // Menu-bar app: no Dock icon, no main window.
         NSApp.setActivationPolicy(.accessory)

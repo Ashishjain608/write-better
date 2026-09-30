@@ -55,6 +55,21 @@
 	<string>Copyright © 2026 Ashish Jain. Released under the MIT licence.</string>
 
 	<!--
+	  Sparkle 2 auto-update. The feed is a release asset, so
+	  releases/latest/download/appcast.xml always points at the newest
+	  non-prerelease. The public key verifies the EdDSA signature that
+	  release.yml puts on each DMG; its private half lives only in the
+	  maintainer's keychain and the SPARKLE_ED_PRIVATE_KEY repo secret.
+	  Automatic checks are on by default and can be turned off in About.
+	-->
+	<key>SUFeedURL</key>
+	<string>https://github.com/Ashishjain608/write-better/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>X4auol1WgUT/mKvw1iHkYZcQq8uIBbhsgZE3c4taur0=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+
+	<!--
 	  Text capture is clipboard-first: WriteBetter reads whatever you last
 	  copied and needs no permission at all for that. Accessibility is a
 	  strictly optional upgrade that unlocks two things — reading the current
@@ -62,12 +77,5 @@
 	-->
 	<key>NSAccessibilityUsageDescription</key>
 	<string>WriteBetter can read the text you have selected in another app and paste the improved version straight back into it. This is optional — without it, WriteBetter works from whatever you copy with ⌘C.</string>
-	<!--
-	  Replace-in-place reactivates the app you came from and sends it a paste.
-	  macOS surfaces that under Automation; without this string a hardened
-	  runtime build is terminated the first time it tries.
-	-->
-	<key>NSAppleEventsUsageDescription</key>
-	<string>WriteBetter asks the app you were just using to accept the improved text, so “Replace” can put it back where it came from.</string>
 </dict>
 </plist>
