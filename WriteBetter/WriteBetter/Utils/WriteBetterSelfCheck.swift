@@ -159,7 +159,7 @@ nonisolated enum WriteBetterSelfCheck {
 
     private static func checkAnthropicRequest(_ report: Report) {
         let improvement = ImprovementRequest(originalText: sampleText, action: .concise)
-        let service = AnthropicService(modelID: "claude-sonnet-5", apiKey: testKey)
+        let service = AnthropicService(modelID: "claude-sonnet-5-5", apiKey: testKey)
         guard let request = try? service.buildRequest(improvement, stream: true),
               let bodyData = request.httpBody,
               let body = HTTPStream.json(bodyData) else {
@@ -180,7 +180,7 @@ nonisolated enum WriteBetterSelfCheck {
         report.check("anthropic sends no bearer token",
                      request.value(forHTTPHeaderField: "authorization") == nil)
 
-        report.equal("anthropic body.model", body["model"] as? String ?? "", "claude-sonnet-5")
+        report.equal("anthropic body.model", body["model"] as? String ?? "", "claude-sonnet-5-5")
         report.equal("anthropic body.max_tokens", body["max_tokens"] as? Int ?? 0,
                      Constants.maxOutputTokens)
         report.equal("anthropic body.stream", body["stream"] as? Bool ?? false, true)
@@ -191,8 +191,10 @@ nonisolated enum WriteBetterSelfCheck {
         report.equal("anthropic body.messages[0].role", messages.first?["role"] as? String ?? "", "user")
         report.equal("anthropic body.messages[0].content",
                      messages.first?["content"] as? String ?? "", improvement.userPrompt)
-        report.equal("anthropic disables thinking on Sonnet 5",
-                     (body["thinking"] as? [String: Any])?["type"] as? String ?? "", "disabled")
+        // Sonnet 5.5 400s on thinking:disabled; it gets adaptive thinking at low effort.
+        report.check("anthropic never sends thinking:disabled on Sonnet 5.5", body["thinking"] == nil)
+        report.equal("anthropic uses low effort on Sonnet 5.5",
+                     (body["output_config"] as? [String: Any])?["effort"] as? String ?? "", "low")
 
         // Haiku 4.5 predates the parameter — it must not be sent.
         let haiku = AnthropicService(modelID: "claude-haiku-4-5", apiKey: testKey)
@@ -202,16 +204,18 @@ nonisolated enum WriteBetterSelfCheck {
         report.equal("anthropic body.model follows the selected model",
                      haikuBody["model"] as? String ?? "", "claude-haiku-4-5")
 
-        // Opus 5 must NOT disable thinking: with thinking off it can leak
-        // `<thinking>` tags into the visible answer, and the visible answer is
-        // what we put on the user's clipboard. Low effort instead.
-        let opus = AnthropicService(modelID: "claude-opus-5", apiKey: testKey)
+        // Opus 5.5 can't disable thinking (400 at every effort): low effort instead.
+        let opus = AnthropicService(modelID: "claude-opus-5-5", apiKey: testKey)
         let opusBody = (try? opus.buildRequest(improvement, stream: true))
             .flatMap(\.httpBody).flatMap(HTTPStream.json) ?? [:]
-        report.check("anthropic never disables thinking on Opus 5", opusBody["thinking"] == nil)
-        report.equal("anthropic uses low effort on Opus 5",
+        report.check("anthropic never sends thinking on Opus 5.5", opusBody["thinking"] == nil)
+        report.equal("anthropic uses low effort on Opus 5.5",
                      (opusBody["output_config"] as? [String: Any])?["effort"] as? String ?? "", "low")
-        report.check("anthropic sends no output_config on Sonnet 5", body["output_config"] == nil)
+        report.check("anthropic sends no output_config on Haiku 4.5", haikuBody["output_config"] == nil)
+        report.check("anthropic sends no fallbacks or beta header",
+                     body["fallbacks"] == nil
+                     && (try? service.buildRequest(improvement, stream: true))?
+                        .value(forHTTPHeaderField: "anthropic-beta") == nil)
 
         // Non-streaming variant flips exactly one field.
         let nonStreaming = (try? service.buildRequest(improvement, stream: false))
@@ -342,7 +346,7 @@ nonisolated enum WriteBetterSelfCheck {
 
     private static let anthropicSample = """
     event: message_start
-    data: {"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"stop_reason":null,"usage":{"input_tokens":412,"output_tokens":1}}}
+    data: {"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-sonnet-5-5","content":[],"stop_reason":null,"usage":{"input_tokens":412,"output_tokens":1}}}
 
     event: ping
     data: {"type": "ping"}

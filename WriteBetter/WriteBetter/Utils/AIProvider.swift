@@ -94,11 +94,11 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         switch self {
         case .anthropic:
             return [
-                AIModelOption(id: "claude-sonnet-5",
-                              name: "Claude Sonnet 5",
+                AIModelOption(id: "claude-sonnet-5-5",
+                              name: "Claude Sonnet 5.5",
                               blurb: "Recommended — best balance"),
-                AIModelOption(id: "claude-opus-5",
-                              name: "Claude Opus 5",
+                AIModelOption(id: "claude-opus-5-5",
+                              name: "Claude Opus 5.5",
                               blurb: "Highest quality, slower"),
                 AIModelOption(id: "claude-haiku-4-5",
                               name: "Claude Haiku 4.5",

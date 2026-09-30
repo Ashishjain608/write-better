@@ -23,24 +23,15 @@ nonisolated struct AnthropicService: AIService {
 
     // MARK: Request building
 
-    /// Models whose default is to think before answering. Rewriting is a
-    /// latency-sensitive, non-reasoning task, so we switch it off explicitly.
-    /// Haiku 4.5 predates the parameter and does not think unless asked, so it
-    /// is deliberately absent.
-    /// Models where `thinking: {"type": "disabled"}` is both accepted and safe.
-    ///
-    /// Opus 5 is deliberately absent. It accepts the parameter (at effort `high` or
-    /// below), but with thinking off it can leak `<thinking>` tags into the visible
-    /// response — and our visible response goes straight onto the user's clipboard.
-    /// Opus 5 gets low effort instead: thinking stays on, depth stays minimal.
-    /// Haiku 4.5 is absent for a different reason — it predates the parameter, so
-    /// omitting `thinking` is already "off" and `effort` would 400.
-    private static let modelsSupportingDisabledThinking: Set<String> = [
-        "claude-sonnet-5", "claude-opus-4-8", "claude-sonnet-4-6",
-    ]
-
-    /// Models that take `output_config.effort` instead of disabled thinking.
-    private static let modelsUsingLowEffort: Set<String> = ["claude-opus-5"]
+    /// Models that think by default and can't be told to stop: Sonnet 5.5 rejects
+    /// `thinking: {"type": "disabled"}` and Opus 5.5 rejects it at every effort (both 400).
+    /// A rewrite is latency-sensitive and tool-less, so they get adaptive thinking at
+    /// `output_config.effort: "low"`, which the migration guide recommends over
+    /// `thinking: {"type": "between_tools"}` (Sonnet 5.5 only, restricted fields, effort
+    /// <= high). Adaptive keeps reasoning in separate `thinking` blocks, which `decode`
+    /// drops, so nothing but the rewrite reaches the user's clipboard. Haiku 4.5 predates
+    /// both parameters and is deliberately absent: omitting them already means "no thinking".
+    private static let modelsUsingLowEffort: Set<String> = ["claude-sonnet-5-5", "claude-opus-5-5"]
 
     func buildRequest(_ improvement: ImprovementRequest, stream: Bool) throws -> URLRequest {
         var request = URLRequest(url: Self.messagesURL)
@@ -58,9 +49,7 @@ nonisolated struct AnthropicService: AIService {
                 ["role": "user", "content": improvement.userPrompt],
             ],
         ]
-        if Self.modelsSupportingDisabledThinking.contains(modelID) {
-            body["thinking"] = ["type": "disabled"]
-        } else if Self.modelsUsingLowEffort.contains(modelID) {
+        if Self.modelsUsingLowEffort.contains(modelID) {
             body["output_config"] = ["effort": "low"]
         }
 
