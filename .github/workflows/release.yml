@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: macos-26
+    permissions:
+      contents: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      KEYCHAIN: ${{ github.workspace }}/../release.keychain-db
+    steps:
+      - uses: actions/checkout@v7
+
+      # The tag is the single source of the version; refuse a tag that disagrees
+      # with the project, otherwise Sparkle would advertise the wrong build.
+      - name: Check tag matches MARKETING_VERSION
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          base="${TAG#v}"; base="${base%%-*}"
+          proj="$(grep -m1 'MARKETING_VERSION' WriteBetter/WriteBetter.xcodeproj/project.pbxproj | sed -E 's/.*= *([^;]+);/\1/')"
+          [ "$base" = "$proj" ] || { echo "::error::tag $TAG != MARKETING_VERSION $proj"; exit 1; }
+
+      # APPLE_CERTIFICATE is a base64 Developer ID Application .p12. It lives only
+      # in a throwaway keychain that is deleted at the end of the job.
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          pw="$(uuidgen)"
+          echo "::add-mask::$pw"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$pw" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$pw" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      # Build, sign inside-out, notarize + staple the app, build the DMG, sign,
+      # notarize + staple it, then spctl both. create-dmg.sh fails on any step.
+      # APPLE_SIGNING_IDENTITY may be the certificate's name or SHA-1 hash.
+      - name: Build, sign, notarize
+        env:
+          WRITEBETTER_REQUIRE_RELEASE: "1"
+          WRITEBETTER_SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          WRITEBETTER_NOTARY_APPLE_ID: ${{ secrets.APPLE_ID }}
+          WRITEBETTER_NOTARY_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          WRITEBETTER_NOTARY_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          ./create-dmg.sh
+          cp dist/WriteBetter.dmg "dist/WriteBetter-${GITHUB_REF_NAME#v}.dmg"
+
+      # Tags containing "-" (v1.2.0-rc.1) are prereleases: they get the DMG but
+      # no appcast, so Sparkle users never auto-update to a release candidate.
+      - name: Generate appcast
+        id: appcast
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          scripts/make-appcast.sh "$GITHUB_REF_NAME" "dist/WriteBetter-${GITHUB_REF_NAME#v}.dmg" \
+            build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update > dist/appcast.xml
+          xmllint --noout dist/appcast.xml
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          files=(dist/WriteBetter.dmg "dist/WriteBetter-${GITHUB_REF_NAME#v}.dmg")
+          [ -f dist/appcast.xml ] && files+=(dist/appcast.xml)
+          flags=(--title "WriteBetter ${GITHUB_REF_NAME#v}" --generate-notes --verify-tag)
+          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" "${flags[@]}"
+
+      - name: Remove signing keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN" || true
