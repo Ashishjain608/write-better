@@ -3,8 +3,11 @@ import Security
 
 /// Thin wrapper over a `kSecClassGenericPassword` item set, keyed by account.
 ///
-/// Everything is stored with `kSecAttrAccessibleAfterFirstUnlock` so a rewrite
-/// triggered right after login still finds its key.
+/// Items are written with `kSecAttrAccessibleAfterFirstUnlock`. On macOS that attribute
+/// only takes effect in the data-protection keychain; these items live in the login
+/// keychain, where access is governed by the keychain's lock state and the item's
+/// access list (which is why a differently signed build can be asked for permission).
+/// It is set anyway so the items behave the same if they ever move.
 nonisolated enum Keychain {
     private static func baseQuery(service: String, account: String) -> [String: Any] {
         [
@@ -14,20 +17,39 @@ nonisolated enum Keychain {
         ]
     }
 
-    /// Returns the stored secret, or `nil` if there is none.
-    static func read(service: String = Constants.keychainService, account: String) -> String? {
+    enum ReadResult: Equatable {
+        case found(String)
+        /// Nothing saved: the only case that means "the user has no key".
+        case notFound
+        /// The Keychain refused or failed (locked, access denied, …); a key may well exist.
+        case failure(OSStatus)
+    }
+
+    /// Reads the stored secret, telling "no key" apart from "couldn't read it".
+    static func readResult(service: String = Constants.keychainService, account: String) -> ReadResult {
         var query = baseQuery(service: service, account: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess,
-              let data = item as? Data,
-              let value = String(data: data, encoding: .utf8),
-              !value.isEmpty
-        else { return nil }
-        return value
+        switch status {
+        case errSecSuccess:
+            guard let data = item as? Data, let value = String(data: data, encoding: .utf8),
+                  !value.isEmpty else { return .notFound }
+            return .found(value)
+        case errSecItemNotFound:
+            return .notFound
+        default:
+            return .failure(status)
+        }
+    }
+
+    /// The stored secret, or `nil` when there is none or it couldn't be read.
+    /// Use `readResult` where the difference matters.
+    static func read(service: String = Constants.keychainService, account: String) -> String? {
+        if case .found(let value) = readResult(service: service, account: account) { return value }
+        return nil
     }
 
     /// Adds the secret, or updates it in place when one already exists.

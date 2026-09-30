@@ -60,33 +60,15 @@ nonisolated struct AnthropicService: AIService {
     // MARK: Streaming
 
     func improveTextStream(request improvement: ImprovementRequest) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
-                    guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
-
-                    let urlRequest = try buildRequest(improvement, stream: true)
-                    let emitted = try await HTTPStream.run(
-                        urlRequest,
-                        decode: Self.decode(event:),
-                        mapHTTPError: Self.mapHTTPError,
-                        onText: { continuation.yield($0) }
-                    )
-                    if !emitted {
-                        throw AIServiceError.api("Claude returned no text. Try again or pick a different model.")
-                    }
-                    continuation.finish()
-                } catch {
-                    if HTTPStream.isCancellation(error) {
-                        continuation.finish()
-                    } else {
-                        continuation.finish(throwing: HTTPStream.transportError(error))
-                    }
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        HTTPStream.textStream(
+            emptyMessage: "Claude returned no text. Try again or pick a different model.",
+            prepare: {
+                guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
+                guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
+                return try buildRequest(improvement, stream: true)
+            },
+            decode: Self.decode(event:),
+            mapHTTPError: Self.mapHTTPError)
     }
 
     // MARK: Key validation
@@ -115,8 +97,6 @@ nonisolated struct AnthropicService: AIService {
     static func decode(event: SSEEvent) throws -> StreamOutcome {
         let payload = event.data.trimmingCharacters(in: .whitespaces)
         guard !payload.isEmpty else { return .ignore }
-        // Not part of the Messages spec, but harmless to honour if a proxy adds it.
-        if payload == "[DONE]" { return .done }
         guard let data = payload.data(using: .utf8),
               let json = HTTPStream.json(data) else { return .ignore }
 
@@ -131,11 +111,16 @@ nonisolated struct AnthropicService: AIService {
             return .ignore
 
         case "message_delta":
-            if let delta = json["delta"] as? [String: Any],
-               (delta["stop_reason"] as? String) == "refusal" {
+            switch ((json["delta"] as? [String: Any])?["stop_reason"] as? String) ?? "" {
+            case "refusal":
+                // Includes a refusal after partial output: the caller keeps what arrived
+                // on screen but the request fails, so it is never offered as a result.
                 throw AIServiceError.api("Claude declined to rewrite this text.")
+            case "max_tokens", "model_context_window_exceeded":
+                return .truncated
+            default:
+                return .ignore
             }
-            return .ignore
 
         case "message_stop":
             return .done

@@ -42,6 +42,13 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Providers whose saved key the Keychain would not hand over (locked, or access
+    /// denied). Distinct from "no key": a key probably exists, so the UI must not say
+    /// there isn't one.
+    @Published private(set) var unreadableKeys: Set<AIProvider> = []
+
+    func keyIsUnreadable(_ provider: AIProvider) -> Bool { unreadableKeys.contains(provider) }
+
     /// The normalized custom endpoint, or `nil` when unset or malformed.
     var customEndpointURL: URL? { CustomEndpointService.normalizedBaseURL(customBaseURL) }
 
@@ -109,9 +116,11 @@ final class SettingsStore: ObservableObject {
         if trimmed.isEmpty {
             Keychain.delete(service: keychainService, account: provider.rawValue)
             keyCache[provider] = nil
+            unreadableKeys.remove(provider)
         } else {
             let ok = Keychain.write(trimmed, service: keychainService, account: provider.rawValue)
             if ok {
+                unreadableKeys.remove(provider)
                 keyCache[provider] = trimmed
             } else {
                 // Keychain refused the write — do not pretend it stuck.
@@ -177,8 +186,28 @@ final class SettingsStore: ObservableObject {
 
     private func refreshKeyCache() {
         for provider in AIProvider.allCases where provider != .apple {
-            keyCache[provider] = Keychain.read(service: keychainService, account: provider.rawValue)
+            readKey(for: provider)
         }
+        recomputeConfiguredProviders()
+    }
+
+    private func readKey(for provider: AIProvider) {
+        switch Keychain.readResult(service: keychainService, account: provider.rawValue) {
+        case .found(let key):
+            keyCache[provider] = key
+            unreadableKeys.remove(provider)
+        case .notFound:
+            keyCache[provider] = nil
+            unreadableKeys.remove(provider)
+        case .failure:
+            keyCache[provider] = nil
+            unreadableKeys.insert(provider)
+        }
+    }
+
+    /// Asks the Keychain again, e.g. after the user unlocked it.
+    func retryKeychainRead(for provider: AIProvider) {
+        readKey(for: provider)
         recomputeConfiguredProviders()
     }
 
@@ -194,8 +223,13 @@ final class SettingsStore: ObservableObject {
             return
         }
 
-        let existing = Keychain.read(service: keychainService, account: AIProvider.anthropic.rawValue)
-        if existing == nil {
+        switch Keychain.readResult(service: keychainService, account: AIProvider.anthropic.rawValue) {
+        case .failure:
+            // Can't tell whether a key is already saved; don't risk overwriting it.
+            return
+        case .found:
+            break
+        case .notFound:
             guard Keychain.write(legacy,
                                  service: keychainService,
                                  account: AIProvider.anthropic.rawValue) else {

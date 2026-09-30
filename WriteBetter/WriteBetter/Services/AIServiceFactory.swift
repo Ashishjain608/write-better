@@ -9,6 +9,12 @@ nonisolated enum AIServiceFactory {
     @MainActor
     static func makeService() throws -> AIService {
         let settings = SettingsStore.shared
+        // A key the Keychain wouldn't release is not a missing key: retry once, then say so.
+        let selected = settings.selectedProvider
+        if settings.keyIsUnreadable(selected) {
+            settings.retryKeychainRead(for: selected)
+            if settings.keyIsUnreadable(selected) { throw AIServiceError.keychainUnavailable(selected) }
+        }
         guard !settings.configuredProviders.isEmpty else {
             throw AIServiceError.noProviderConfigured
         }

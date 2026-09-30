@@ -85,35 +85,19 @@ nonisolated struct CustomEndpointService: AIService {
     // MARK: Streaming
 
     func improveTextStream(request improvement: ImprovementRequest) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
-                    guard !modelID.trimmingCharacters(in: .whitespaces).isEmpty else {
-                        throw AIServiceError.api("Enter a model id for the custom endpoint in Settings.")
-                    }
-
-                    let urlRequest = try buildRequest(improvement, stream: true)
-                    let emitted = try await HTTPStream.run(
-                        urlRequest,
-                        decode: Self.decode(event:),
-                        mapHTTPError: Self.mapHTTPError,
-                        onText: { continuation.yield($0) }
-                    )
-                    if !emitted {
-                        throw AIServiceError.api("The server returned no text. Check the model id, or try another model.")
-                    }
-                    continuation.finish()
-                } catch {
-                    if HTTPStream.isCancellation(error) {
-                        continuation.finish()
-                    } else {
-                        continuation.finish(throwing: Self.transportError(error, baseURL: baseURL))
-                    }
+        let baseURL = self.baseURL
+        return HTTPStream.textStream(
+            emptyMessage: "The server returned no text. Check the model id, or try another model.",
+            prepare: {
+                guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
+                guard !modelID.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    throw AIServiceError.api("Enter a model id for the custom endpoint in Settings.")
                 }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+                return try buildRequest(improvement, stream: true)
+            },
+            decode: Self.decode(event:),
+            mapHTTPError: Self.mapHTTPError,
+            mapTransport: { Self.transportError($0, baseURL: baseURL) })
     }
 
     // MARK: Key validation and model listing
@@ -184,6 +168,8 @@ nonisolated struct CustomEndpointService: AIService {
             return text.isEmpty ? .ignore : .text(text)
         case "content_filter":
             throw AIServiceError.api("The server's content filter blocked this text.")
+        case "length":
+            return text.isEmpty ? .truncated : .textThenTruncated(text)
         default:
             return text.isEmpty ? .done : .textThenDone(text)
         }

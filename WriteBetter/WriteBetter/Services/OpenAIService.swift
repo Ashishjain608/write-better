@@ -69,33 +69,15 @@ nonisolated struct OpenAIService: AIService {
     // MARK: Streaming
 
     func improveTextStream(request improvement: ImprovementRequest) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
-                    guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
-
-                    let urlRequest = try buildRequest(improvement, stream: true)
-                    let emitted = try await HTTPStream.run(
-                        urlRequest,
-                        decode: Self.decode(event:),
-                        mapHTTPError: Self.mapHTTPError,
-                        onText: { continuation.yield($0) }
-                    )
-                    if !emitted {
-                        throw AIServiceError.api("The model returned no text. Try again or pick a different model.")
-                    }
-                    continuation.finish()
-                } catch {
-                    if HTTPStream.isCancellation(error) {
-                        continuation.finish()
-                    } else {
-                        continuation.finish(throwing: HTTPStream.transportError(error))
-                    }
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        HTTPStream.textStream(
+            emptyMessage: "The model returned no text. Try again or pick a different model.",
+            prepare: {
+                guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
+                guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
+                return try buildRequest(improvement, stream: true)
+            },
+            decode: Self.decode(event:),
+            mapHTTPError: Self.mapHTTPError)
     }
 
     // MARK: Key validation
@@ -137,8 +119,13 @@ nonisolated struct OpenAIService: AIService {
             return .done
 
         case "response.incomplete":
-            // Truncated by max_output_tokens: keep what we streamed.
-            return .done
+            let response = json["response"] as? [String: Any]
+            let reason = (response?["incomplete_details"] as? [String: Any])?["reason"] as? String
+            if reason == "content_filter" {
+                throw AIServiceError.api("OpenAI's content filter stopped this rewrite.")
+            }
+            // max_output_tokens: what streamed is a prefix of the answer, not the answer.
+            return .truncated
 
         case "response.failed":
             let response = json["response"] as? [String: Any]

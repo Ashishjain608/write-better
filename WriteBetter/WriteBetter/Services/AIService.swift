@@ -42,6 +42,13 @@ nonisolated enum AIServiceError: LocalizedError, Sendable, Equatable {
     case invalidResponse
     /// Nothing was selected.
     case emptyInput
+    /// The stream ended before the answer was finished. The text that did arrive is kept,
+    /// but it is not a complete rewrite. `hitLimit`: the model stopped at its output limit
+    /// (otherwise the connection just ended).
+    case cutOff(hitLimit: Bool)
+    /// The Keychain refused to hand over a saved key (locked, or access denied), which is
+    /// different from there being no key.
+    case keychainUnavailable(AIProvider)
     /// The custom endpoint could not be reached. `localNetworkBlocked` means macOS's
     /// Local Network privacy switch is the reason, not the server.
     case endpointUnreachable(host: String, localNetworkBlocked: Bool)
@@ -77,6 +84,11 @@ nonisolated enum AIServiceError: LocalizedError, Sendable, Equatable {
             return "The provider sent a response WriteBetter couldn't read."
         case .emptyInput:
             return "There's no text to improve."
+        case .cutOff(let hitLimit):
+            return hitLimit ? "The result was cut off at the model's length limit."
+                            : "The connection ended before the result was finished."
+        case .keychainUnavailable(let provider):
+            return "WriteBetter couldn't read your \(provider.displayName) key from the Keychain."
         case .endpointUnreachable(let host, let blocked):
             return blocked
                 ? "macOS blocked WriteBetter from reaching \(host)."
@@ -118,6 +130,11 @@ nonisolated enum AIServiceError: LocalizedError, Sendable, Equatable {
             return "Try again. If it keeps happening, switch model in Settings."
         case .emptyInput:
             return "Select some text first, then press the hotkey."
+        case .cutOff(let hitLimit):
+            return hitLimit ? "You can copy what arrived, but Replace is off. Select less text, or press ⌘R to retry."
+                            : "You can copy what arrived, but Replace is off. Press ⌘R to try again."
+        case .keychainUnavailable:
+            return "Unlock your login keychain, or allow WriteBetter access when macOS asks, then press ⌘R."
         case .endpointUnreachable(_, let blocked):
             return blocked
                 ? "Allow WriteBetter in System Settings → Privacy & Security → Local Network, then try again."

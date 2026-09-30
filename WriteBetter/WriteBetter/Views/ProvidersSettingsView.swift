@@ -308,7 +308,10 @@ private struct ProviderRow: View {
         case .offline:
             StatusPill(text: "Offline", tint: Theme.Color.warning, systemImage: "wifi.slash")
         case .idle:
-            if settings.isUsable(provider) {
+            if settings.keyIsUnreadable(provider) {
+                StatusPill(text: "Keychain locked", tint: Theme.Color.warning,
+                           systemImage: "lock.fill")
+            } else if settings.isUsable(provider) {
                 StatusPill(text: provider.needsAPIKey ? "Key saved" : (provider == .apple ? "Ready" : "Server set"),
                            tint: Theme.Color.success, systemImage: "checkmark.circle.fill")
             } else {

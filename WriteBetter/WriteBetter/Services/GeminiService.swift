@@ -82,33 +82,15 @@ nonisolated struct GeminiService: AIService {
     // MARK: Streaming
 
     func improveTextStream(request improvement: ImprovementRequest) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
-                    guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
-
-                    let urlRequest = try buildRequest(improvement, stream: true)
-                    let emitted = try await HTTPStream.run(
-                        urlRequest,
-                        decode: Self.decode(event:),
-                        mapHTTPError: Self.mapHTTPError,
-                        onText: { continuation.yield($0) }
-                    )
-                    if !emitted {
-                        throw AIServiceError.api("Gemini returned no text. Try again or pick a different model.")
-                    }
-                    continuation.finish()
-                } catch {
-                    if HTTPStream.isCancellation(error) {
-                        continuation.finish()
-                    } else {
-                        continuation.finish(throwing: HTTPStream.transportError(error))
-                    }
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        HTTPStream.textStream(
+            emptyMessage: "Gemini returned no text. Try again or pick a different model.",
+            prepare: {
+                guard !improvement.isEmpty else { throw AIServiceError.emptyInput }
+                guard !apiKey.isEmpty else { throw AIServiceError.missingKey(provider) }
+                return try buildRequest(improvement, stream: true)
+            },
+            decode: Self.decode(event:),
+            mapHTTPError: Self.mapHTTPError)
     }
 
     // MARK: Key validation
@@ -175,7 +157,8 @@ nonisolated struct GeminiService: AIService {
             throw AIServiceError.api("Gemini stopped early (\(reason)) and returned nothing.")
         }
 
-        if finishReason != nil {
+        if let reason = finishReason {
+            if reason == "MAX_TOKENS" { return text.isEmpty ? .truncated : .textThenTruncated(text) }
             return text.isEmpty ? .done : .textThenDone(text)
         }
         return text.isEmpty ? .ignore : .text(text)

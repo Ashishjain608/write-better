@@ -10,8 +10,10 @@ nonisolated enum Constants {
     /// Give up if the provider sends nothing for this long (also covers a mid-stream stall).
     static let firstByteTimeout: TimeInterval = 20
 
-    /// Hard ceiling on one rewrite, from connect to last byte.
-    static let overallTimeout: TimeInterval = 60
+    /// Hard ceiling on one rewrite, from connect to last byte. Generous on purpose: long
+    /// rewrites and slow local models are legitimate, and `firstByteTimeout` (an
+    /// inactivity timer) already ends a stalled stream within 20 s.
+    static let overallTimeout: TimeInterval = 300
 
     /// Keychain generic-password service holding every provider key.
     static let keychainService = "com.aj.WriteBetter.apikeys"

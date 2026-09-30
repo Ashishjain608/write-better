@@ -135,6 +135,31 @@ private struct UpdatesFrequently: ViewModifier {
     }
 }
 
+// MARK: - Cut-off notice
+
+/// Shown with a partial result the provider stopped short of finishing. The text stays
+/// copyable; the wording says why Replace is gone so the missing button isn't a mystery.
+struct CutOffNotice: View {
+    let error: AIServiceError
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                Text(error.errorDescription ?? "The result was cut off.")
+                    .textStyle(.label)
+                if let suggestion = error.recoverySuggestion {
+                    Text(suggestion).textStyle(.caption)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "scissors")
+        }
+        .foregroundStyle(Theme.Color.warning)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - Error card (§7.1)
 
 /// Fills the result canvas. Renders `errorDescription` then `recoverySuggestion` —
@@ -428,6 +453,13 @@ struct SourceStrip: View {
     .padding(Theme.Space.xl)
     .frame(width: 560)
     .background(Theme.Color.surface)
+}
+
+#Preview("Cut-off notice") {
+    CutOffNotice(error: .cutOff(hitLimit: true))
+        .padding(Theme.Space.xl)
+        .frame(width: 560)
+        .background(Theme.Color.surface)
 }
 
 #Preview("Setup card — no API key") {
