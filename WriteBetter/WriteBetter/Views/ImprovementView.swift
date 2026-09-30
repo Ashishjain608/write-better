@@ -7,6 +7,7 @@ struct ImprovementView: View {
     @ObservedObject var controller: ImprovementController
     @ObservedObject var router: PanelKeyRouter
     @ObservedObject var settings: SettingsStore
+    @ObservedObject var customActions: CustomActionStore
     let extractor: TextExtractor
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -15,6 +16,11 @@ struct ImprovementView: View {
     @State private var sourceExpanded = false
     @State private var showHelp = false
     @State private var showPermissionExplainer = false
+    /// The instruction being saved as a custom action (the "Save as action" sheet).
+    @State private var savingInstruction: String?
+    /// The saved action that produced the current result; the controller only
+    /// tracks built-ins, so the panel tracks this one itself.
+    @State private var activeCustomID: CustomAction.ID?
     @State private var confirmation: String?
     @State private var copyPulse = false
     @State private var rimPeak = false
@@ -23,11 +29,13 @@ struct ImprovementView: View {
     init(controller: ImprovementController,
          router: PanelKeyRouter,
          extractor: TextExtractor,
-         settings: SettingsStore) {
+         settings: SettingsStore,
+         customActions: CustomActionStore? = nil) {
         self.controller = controller
         self.router = router
         self.extractor = extractor
         self.settings = settings
+        self.customActions = customActions ?? MainActor.assumeIsolated { .shared }
     }
 
     // MARK: - Body
@@ -46,6 +54,14 @@ struct ImprovementView: View {
                       rimTint: Theme.Color.streaming)
         .overlay { if showHelp { ShortcutsOverlay(isPresented: $showHelp) } }
         .overlay { if showPermissionExplainer { permissionExplainer } }
+        .overlay {
+            if let savingInstruction {
+                SaveActionSheet(instruction: savingInstruction,
+                                store: customActions,
+                                onDismiss: { self.savingInstruction = nil },
+                                onSaved: { digit in show(confirmation: "Saved as ⌘\(digit)") })
+            }
+        }
         .onReceive(router.commands, perform: handle)
         .onChange(of: controller.phase.kind) { _, _ in phaseChanged() }
         .accessibilityElement(children: .contain)
@@ -179,7 +195,10 @@ struct ImprovementView: View {
                 resultBlock
             }
 
-            if showsQuickActions { quickActionRail }
+            if showsQuickActions {
+                quickActionRail
+                if !customActions.actions.isEmpty { customActionRail }
+            }
             if showsPromptBar { promptBar }
         }
         .padding(.horizontal, Theme.Space.xl)
@@ -363,6 +382,7 @@ struct ImprovementView: View {
                 ForEach(Array(QuickAction.allCases.enumerated()), id: \.element.id) { index, action in
                     Button {
                         promptFocused = false
+                        activeCustomID = nil
                         controller.run(action: action, customPrompt: nil)
                     } label: {
                         HStack(spacing: Theme.Space.sm) {
@@ -393,6 +413,52 @@ struct ImprovementView: View {
                    value: quickActionOpacity)
     }
 
+    /// Second row: saved actions on ⌘6–⌘9, same chips as the built-ins. A row of
+    /// its own keeps the built-in row untouched; a scroll covers long names.
+    private var customActionRail: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Theme.Space.md) {
+                ForEach(Array(customActions.actions.enumerated()), id: \.element.id) { index, action in
+                    let digit = CustomAction.shortcutDigit(at: index)
+                    Button {
+                        run(custom: action)
+                    } label: {
+                        HStack(spacing: Theme.Space.sm) {
+                            if let icon = action.icon {
+                                Image(systemName: icon)
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            Text(action.name).lineLimit(1)
+                            if router.isCommandHeld, let digit {
+                                Text("\(digit)")
+                                    .textStyle(.keycap)
+                                    .foregroundStyle(Theme.Color.accentText)
+                            }
+                        }
+                    }
+                    .buttonStyle(ChipButtonStyle(isSelected: activeCustomID == action.id && controller.activeAction == nil))
+                    .disabled(!quickActionsEnabled)
+                    .help(action.instruction)
+                    .accessibilityLabel(action.name)
+                    .accessibilityHint(digit.map { "Runs your saved action. Command \($0)" } ?? "Runs your saved action")
+                }
+            }
+            .padding(.horizontal, Theme.Space.xl)
+        }
+        .frame(height: 34)
+        .padding(.horizontal, -Theme.Space.xl)
+        .mask(edgeFade)
+        .opacity(quickActionOpacity)
+        .animation(Theme.Motion.curve(Theme.Motion.quick, reduceMotion: reduceMotion),
+                   value: quickActionOpacity)
+    }
+
+    private func run(custom action: CustomAction) {
+        promptFocused = false
+        controller.run(action: nil, customPrompt: action.instruction)
+        activeCustomID = action.id
+    }
+
     /// 16pt fade-out at both scroll edges.
     private var edgeFade: some View {
         LinearGradient(stops: [
@@ -418,6 +484,17 @@ struct ImprovementView: View {
                 .onSubmit(submitPrompt)
 
             if !controller.customPrompt.isEmpty {
+                Button {
+                    savingInstruction = controller.customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                } label: {
+                    Image(systemName: "bookmark")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.Color.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .minimumHitTarget()
+                .help("Save as action")
+                .accessibilityLabel("Save as action")
                 Keycap(symbol: "⌘↩")
                 Button(action: submitPrompt) {
                     Image(systemName: "arrow.up.circle.fill")
@@ -445,6 +522,7 @@ struct ImprovementView: View {
     private func submitPrompt() {
         let text = controller.customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        activeCustomID = nil
         controller.run(action: nil, customPrompt: text)
         controller.customPrompt = ""
         promptFocused = false
@@ -748,8 +826,13 @@ struct ImprovementView: View {
 
         case .quickAction(let index):
             let actions = QuickAction.allCases
-            guard index >= 0, index < actions.count, !controller.phase.isCapturing else { return }
-            controller.run(action: actions[index], customPrompt: nil)
+            guard index >= 0, !controller.phase.isCapturing else { return }
+            if index < actions.count {
+                activeCustomID = nil
+                controller.run(action: actions[index], customPrompt: nil)
+            } else if customActions.actions.indices.contains(index - actions.count) {
+                run(custom: customActions.actions[index - actions.count])
+            }
 
         case .nextProvider:
             controller.cycleProvider(forward: true)

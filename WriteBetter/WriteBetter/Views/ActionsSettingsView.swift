@@ -207,7 +207,7 @@ struct ActionsSettingsView: View {
 // MARK: - Editor
 
 /// Name, glyph and instruction for one action, edited in place inside the group.
-private struct ActionEditor: View {
+struct ActionEditor: View {
     let original: CustomAction?
     let onSave: (CustomAction) -> Void
     let onCancel: () -> Void
