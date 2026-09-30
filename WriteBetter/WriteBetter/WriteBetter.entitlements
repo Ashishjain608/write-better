@@ -23,11 +23,10 @@
 	<true/>
 
 	<!--
-	  Required under the hardened runtime for Replace-in-place: reactivating the
-	  previously-frontmost app and handing it the improved text. Grants nothing
-	  on its own — TCC still prompts per target app.
+	  No Apple Events entitlement: Replace-in-place uses
+	  NSRunningApplication.activate and CGEvent.post, neither of which sends
+	  Apple Events, so the entitlement (and NSAppleEventsUsageDescription)
+	  would only widen the attack surface for nothing.
 	-->
-	<key>com.apple.security.automation.apple-events</key>
-	<true/>
 </dict>
 </plist>
