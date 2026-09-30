@@ -42,12 +42,16 @@ nonisolated enum AIServiceError: LocalizedError, Sendable, Equatable {
     case invalidResponse
     /// Nothing was selected.
     case emptyInput
+    /// The custom endpoint could not be reached. `localNetworkBlocked` means macOS's
+    /// Local Network privacy switch is the reason, not the server.
+    case endpointUnreachable(host: String, localNetworkBlocked: Bool)
 
     var errorDescription: String? {
         switch self {
         case .noProviderConfigured:
             return "WriteBetter isn't set up yet."
         case .missingKey(let provider):
+            if !provider.needsAPIKey { return "No server address saved for \(provider.displayName)." }
             return "No \(provider.displayName) API key saved."
         case .invalidKey(let provider):
             return "\(provider.displayName) rejected this API key."
@@ -72,14 +76,19 @@ nonisolated enum AIServiceError: LocalizedError, Sendable, Equatable {
             return "The provider sent a response WriteBetter couldn't read."
         case .emptyInput:
             return "There's no text to improve."
+        case .endpointUnreachable(let host, let blocked):
+            return blocked
+                ? "macOS blocked WriteBetter from reaching \(host)."
+                : "Couldn't connect to \(host)."
         }
     }
 
     var recoverySuggestion: String? {
         switch self {
         case .noProviderConfigured:
-            return "Open Settings and add an API key for Anthropic, OpenAI or Google Gemini."
+            return "Open Settings and add an API key for Anthropic, OpenAI or Google Gemini, or point WriteBetter at a local server."
         case .missingKey(let provider):
+            if !provider.needsAPIKey { return "Open Settings and enter the server's base URL." }
             return "Open Settings and paste your \(provider.displayName) key."
         case .invalidKey(let provider):
             if let prefix = provider.keyPrefixHint {
@@ -107,6 +116,10 @@ nonisolated enum AIServiceError: LocalizedError, Sendable, Equatable {
             return "Try again. If it keeps happening, switch model in Settings."
         case .emptyInput:
             return "Select some text first, then press the hotkey."
+        case .endpointUnreachable(_, let blocked):
+            return blocked
+                ? "Allow WriteBetter in System Settings → Privacy & Security → Local Network, then try again."
+                : "Check that the server is running and that the address in Settings is right."
         }
     }
 }

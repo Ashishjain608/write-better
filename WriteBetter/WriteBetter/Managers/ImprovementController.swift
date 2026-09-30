@@ -114,9 +114,13 @@ final class ImprovementController: ObservableObject {
 
     var selectedProvider: AIProvider { settings.selectedProvider }
 
+    /// The active model. A hand-typed id ("Other…", or a custom endpoint's model)
+    /// isn't in the catalog, so it is described by its own id.
     var selectedModel: AIModelOption? {
-        let id = settings.modelID(for: settings.selectedProvider)
-        return settings.selectedProvider.models.first { $0.id == id }
+        let provider = settings.selectedProvider
+        let id = settings.modelID(for: provider)
+        if let known = provider.model(withID: id) { return known }
+        return id.isEmpty ? nil : AIModelOption(id: id, name: id, blurb: "Custom model id")
     }
 
     var configuredProviders: [AIProvider] {
@@ -438,8 +442,11 @@ final class ImprovementController: ObservableObject {
         if settings.configuredProviders.contains(provider) {
             settings.selectedProvider = provider
             regenerate()
-        } else {
+        } else if provider.needsAPIKey {
             phase = .needsKey(provider)
+        } else {
+            // No key to paste here: a server address needs the Settings form.
+            onOpenSettings(provider)
         }
     }
 

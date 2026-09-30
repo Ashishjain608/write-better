@@ -69,5 +69,18 @@
 	-->
 	<key>NSAppleEventsUsageDescription</key>
 	<string>WriteBetter asks the app you were just using to accept the improved text, so “Replace” can put it back where it came from.</string>
+
+	<!--
+	  Custom OpenAI-compatible provider: lets it use plain http:// to localhost, LAN
+	  addresses and .local names (Ollama, LM Studio) without loosening ATS for the
+	  internet, and explains the macOS Local Network prompt for LAN servers.
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>WriteBetter connects to a model server on your local network, such as Ollama or LM Studio, only if you set one up under Settings → Providers.</string>
 </dict>
 </plist>

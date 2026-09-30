@@ -49,7 +49,8 @@ struct WelcomeView: View {
         .frame(width: 560, height: 620)
         .glassSurface(cornerRadius: Theme.Radius.panel)
         .onAppear {
-            chosenProvider = settings.configuredProviders.first ?? settings.selectedProvider
+            let keyed = settings.configuredProviders.first { $0.needsAPIKey }
+            chosenProvider = keyed ?? (settings.selectedProvider.needsAPIKey ? settings.selectedProvider : .anthropic)
             sample.load(text: sampleText)
             accessibility.beginPolling()
         }
@@ -80,7 +81,7 @@ struct WelcomeView: View {
         VStack(alignment: .leading, spacing: Theme.Space.lg) {
             StepHeader(index: 1, title: "Pick a provider")
             HStack(spacing: Theme.Space.lg) {
-                ForEach(AIProvider.allCases) { provider in
+                ForEach(AIProvider.allCases.filter(\.needsAPIKey)) { provider in
                     Button {
                         chosenProvider = provider
                         settings.selectedProvider = provider
@@ -106,6 +107,19 @@ struct WelcomeView: View {
                     .accessibilityAddTraits(chosenProvider == provider ? [.isSelected] : [])
                 }
             }
+            otherWaysIn
+        }
+    }
+
+    /// Under the tiles: the non-key ways in.
+    private var otherWaysIn: some View {
+        HStack(spacing: Theme.Space.md) {
+            Text("Running Ollama, LM Studio or OpenRouter?").textStyle(.caption)
+            Button("Set up a custom server") { SettingsRouter.shared.open(provider: .custom) }
+                .buttonStyle(.link)
+                .textStyle(.caption)
+                .foregroundStyle(Theme.Color.accentText)
+            Spacer(minLength: 0)
         }
     }
 
@@ -282,7 +296,7 @@ struct WelcomeView: View {
     private var activeProvider: AIProvider { chosenProvider ?? settings.selectedProvider }
 
     private var isConfigured: Bool {
-        verification.isVerified || settings.hasKey(for: activeProvider)
+        verification.isVerified || settings.isUsable(activeProvider)
     }
 
     private func verifyKey() {

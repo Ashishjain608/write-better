@@ -22,6 +22,9 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
     case anthropic
     case openai
     case gemini
+    /// Any server that speaks the OpenAI Chat Completions protocol: Ollama, LM Studio,
+    /// OpenRouter, vLLM, a corporate gateway…
+    case custom
 
     var id: String { rawValue }
 
@@ -30,6 +33,24 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .anthropic: return "Anthropic"
         case .openai: return "OpenAI"
         case .gemini: return "Google Gemini"
+        case .custom: return "Custom (OpenAI-compatible)"
+        }
+    }
+
+    /// Compact name for tight chips and tiles.
+    var shortName: String {
+        switch self {
+        case .custom: return "Custom"
+        default: return displayName
+        }
+    }
+
+    /// Anthropic, OpenAI and Gemini are unusable without a key. A custom endpoint takes
+    /// an optional one (local servers don't want any).
+    var needsAPIKey: Bool {
+        switch self {
+        case .anthropic, .openai, .gemini: return true
+        case .custom: return false
         }
     }
 
@@ -38,6 +59,7 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .anthropic: return "Claude"
         case .openai: return "GPT"
         case .gemini: return "Gemini"
+        case .custom: return "Any model"
         }
     }
 
@@ -47,6 +69,7 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .anthropic: return "sparkles"
         case .openai: return "circle.hexagongrid.fill"
         case .gemini: return "diamond.fill"
+        case .custom: return "server.rack"
         }
     }
 
@@ -56,6 +79,7 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .anthropic: return Color(red: 0.80, green: 0.47, blue: 0.36) // clay
         case .openai:    return Color(red: 0.06, green: 0.64, blue: 0.50) // teal
         case .gemini:    return Color(red: 0.26, green: 0.52, blue: 0.96) // blue
+        case .custom:    return Color(red: 0.55, green: 0.45, blue: 0.85) // violet
         }
     }
 
@@ -64,6 +88,7 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .anthropic: return "sk-ant-api03-…"
         case .openai: return "sk-proj-…"
         case .gemini: return "AIza…"
+        case .custom: return "API key (optional)"
         }
     }
 
@@ -76,7 +101,7 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         switch self {
         case .anthropic: return "sk-ant-"
         case .openai: return "sk-"
-        case .gemini: return nil
+        case .gemini, .custom: return nil
         }
     }
 
@@ -86,6 +111,7 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .anthropic: return URL(string: "https://console.anthropic.com/settings/keys")!
         case .openai: return URL(string: "https://platform.openai.com/api-keys")!
         case .gemini: return URL(string: "https://aistudio.google.com/apikey")!
+        case .custom: return URL(string: "https://openrouter.ai/keys")!
         }
     }
 
@@ -128,6 +154,9 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
                               name: "Gemini 3.5 Flash-Lite",
                               blurb: "Cheapest, highest throughput"),
             ]
+        case .custom:
+            // Free text: whatever the server serves. See "Load models" in Settings.
+            return []
         }
     }
 

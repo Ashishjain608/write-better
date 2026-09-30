@@ -50,6 +50,7 @@ nonisolated enum WriteBetterSelfCheck {
         checkOpenAIRequest(report)
         checkGeminiRequest(report)
         checkModelCatalogs(report)
+        checkCustomEndpoint(report)
         checkSSEParser(report)
         checkAnthropicStream(report)
         checkOpenAIStream(report)
@@ -62,6 +63,13 @@ nonisolated enum WriteBetterSelfCheck {
             print("[WriteBetterSelfCheck] \(report.passed) passed, \(report.failures.count) FAILED:")
             for failure in report.failures { print("  ✗ \(failure)") }
         }
+        // Live smoke test of the real service code against a real server:
+        //   --self-check --provider-smoke custom <baseURL> <modelID> <text…>
+        if let index = CommandLine.arguments.firstIndex(of: "--provider-smoke") {
+            let ok = providerSmoke(Array(CommandLine.arguments[(index + 1)...]))
+            if !ok { report.failures.append("provider smoke test") }
+        }
+
         // Flush before the assert: aborting would otherwise discard the buffer
         // and hide the very list you need.
         fflush(stdout)
@@ -361,6 +369,161 @@ nonisolated enum WriteBetterSelfCheck {
             store.setModelID("claude-sonnet-5", for: .anthropic)
             report.equal("a retired model id is remapped",
                          store.modelID(for: .anthropic), "claude-sonnet-5-5")
+        }
+    }
+
+    // MARK: Custom OpenAI-compatible endpoint
+
+    private static let customSample = """
+    data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+    : OPENROUTER PROCESSING
+
+    data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"hmm"},"finish_reason":null}]}
+
+    data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"We were"},"finish_reason":null}]}
+
+    data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":" going to the meeting tomorrow."},"finish_reason":null}]}
+
+    data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+    data: {"id":"c1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":40,"completion_tokens":11}}
+
+    data: [DONE]
+
+
+    """
+
+    private static let customDoneOnlySample = """
+    data: {"choices":[{"delta":{"content":"We were"}}]}
+
+    data: {"choices":[{"delta":{"content":" going."}}]}
+
+    data: [DONE]
+
+
+    """
+
+    private static let customErrorSample = """
+    data: {"choices":[{"delta":{"content":"We were"}}]}
+
+    data: {"error":{"message":"model crashed","type":"server_error","code":500}}
+
+
+    """
+
+    private static func checkCustomEndpoint(_ report: Report) {
+        let improvement = ImprovementRequest(originalText: sampleText, action: .concise)
+        let base = URL(string: "http://localhost:11434/v1")!
+
+        // Base URL normalisation.
+        func norm(_ raw: String) -> String { CustomEndpointService.normalizedBaseURL(raw)?.absoluteString ?? "nil" }
+        report.equal("base URL: as typed", norm("http://localhost:11434/v1"), "http://localhost:11434/v1")
+        report.equal("base URL: missing scheme", norm("localhost:1234/v1"), "http://localhost:1234/v1")
+        report.equal("base URL: trailing slash", norm(" https://openrouter.ai/api/v1/ "), "https://openrouter.ai/api/v1")
+        report.equal("base URL: pasted endpoint", norm("http://localhost:11434/v1/chat/completions"), "http://localhost:11434/v1")
+        report.equal("base URL: empty", norm("   "), "nil")
+        report.equal("base URL: wrong scheme", norm("ftp://host/v1"), "nil")
+
+        // No key → no Authorization header (local servers); key → bearer.
+        let anonymous = CustomEndpointService(modelID: "llama3.2", apiKey: "", baseURL: base)
+        guard let request = try? anonymous.buildRequest(improvement, stream: true),
+              let body = request.httpBody.flatMap(HTTPStream.json) else {
+            report.check("custom request builds", false)
+            return
+        }
+        report.equal("custom URL", request.url?.absoluteString ?? "", "http://localhost:11434/v1/chat/completions")
+        report.equal("custom method", request.httpMethod ?? "", "POST")
+        report.check("custom sends no Authorization without a key",
+                     request.value(forHTTPHeaderField: "authorization") == nil)
+        report.equal("custom body.model", body["model"] as? String ?? "", "llama3.2")
+        report.equal("custom body.stream", body["stream"] as? Bool ?? false, true)
+        report.equal("custom body.max_tokens", body["max_tokens"] as? Int ?? 0, Constants.maxOutputTokens)
+        let messages = body["messages"] as? [[String: Any]] ?? []
+        report.equal("custom messages count", messages.count, 2)
+        report.equal("custom messages[0] is the system prompt",
+                     messages.first?["role"] as? String ?? "", "system")
+        report.equal("custom messages[0].content", messages.first?["content"] as? String ?? "", improvement.systemPrompt)
+        report.equal("custom messages[1].content", messages.last?["content"] as? String ?? "", improvement.userPrompt)
+        report.check("custom does not send Responses API fields",
+                     body["input"] == nil && body["instructions"] == nil && body["reasoning"] == nil)
+
+        let keyed = CustomEndpointService(modelID: "m", apiKey: testKey, baseURL: URL(string: "https://openrouter.ai/api/v1")!)
+        let keyedRequest = try? keyed.buildRequest(improvement, stream: true)
+        report.equal("custom bearer header", keyedRequest?.value(forHTTPHeaderField: "authorization") ?? "", "Bearer \(testKey)")
+        report.equal("custom URL under a path prefix", keyedRequest?.url?.absoluteString ?? "",
+                     "https://openrouter.ai/api/v1/chat/completions")
+
+        // Streams.
+        let expected = "We were going to the meeting tomorrow."
+        for size in [Int.max, 1, 7, 64] {
+            let run = drive(customSample, chunkSize: size, decode: CustomEndpointService.decode(event:))
+            report.equal("custom stream text (chunk=\(size == .max ? 0 : size))", run.text, expected)
+            report.check("custom stream ends cleanly (chunk=\(size == .max ? 0 : size))", run.error == nil)
+        }
+        let doneOnly = drive(customDoneOnlySample, chunkSize: 5, decode: CustomEndpointService.decode(event:))
+        report.equal("custom stream that ends on [DONE] alone", doneOnly.text, "We were going.")
+        let failed = drive(customErrorSample, chunkSize: 9, decode: CustomEndpointService.decode(event:))
+        report.equal("custom mid-stream partial text", failed.text, "We were")
+        report.raised("custom mid-stream error", failed.error, .api("model crashed"))
+        report.check("custom drops reasoning_content",
+                     !drive(customSample, chunkSize: .max, decode: CustomEndpointService.decode(event:)).text.contains("hmm"))
+
+        let filtered = SSEEvent(event: nil, data: "{\"choices\":[{\"delta\":{},\"finish_reason\":\"content_filter\"}]}")
+        report.check("custom surfaces a content-filter stop", (try? CustomEndpointService.decode(event: filtered)) == nil)
+
+        // Model list.
+        let list = Data("{\"object\":\"list\",\"data\":[{\"id\":\"qwen3\"},{\"id\":\"llama3.2\"}]}".utf8)
+        report.equal("custom parses /models", CustomEndpointService.parseModelIDs(list) ?? [], ["llama3.2", "qwen3"])
+        report.check("custom rejects a /models body without data",
+                     CustomEndpointService.parseModelIDs(Data("{}".utf8)) == nil)
+
+        // Error mapping (OpenAI shape and Ollama's bare-string shape).
+        func map(_ status: Int, _ body: String) -> AIServiceError {
+            let response = HTTPURLResponse(url: base, statusCode: status, httpVersion: nil, headerFields: nil)!
+            return CustomEndpointService.mapHTTPError(status, Data(body.utf8), response)
+        }
+        report.raised("custom 401", map(401, "{}"), .invalidKey(.custom))
+        report.raised("custom 402", map(402, "{\"error\":{\"message\":\"credits\"}}"), .quotaExceeded)
+        report.raised("custom 404 surfaces the server's message",
+                      map(404, "{\"error\":{\"message\":\"model \\\"x\\\" not found\"}}"), .api("model \"x\" not found"))
+        report.raised("custom 404 with Ollama's string error", map(404, "{\"error\":\"model not found\"}"), .api("model not found"))
+        report.raised("custom 503", map(503, ""), .serverError(503))
+
+        // Transport: a dead localhost server is "can't connect", never "you're offline".
+        report.raised("custom refused connection",
+                      CustomEndpointService.transportError(URLError(.cannotConnectToHost), baseURL: base),
+                      .endpointUnreachable(host: "localhost", localNetworkBlocked: false))
+        report.raised("custom offline maps to the endpoint, not the internet",
+                      CustomEndpointService.transportError(URLError(.notConnectedToInternet), baseURL: base),
+                      .endpointUnreachable(host: "localhost", localNetworkBlocked: false))
+        let lan = URL(string: "http://192.168.1.20:11434/v1")!
+        let denied = URLError(.cannotConnectToHost, userInfo: [
+            NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: 65)])
+        report.raised("custom local-network denial on a LAN address",
+                      CustomEndpointService.transportError(denied, baseURL: lan),
+                      .endpointUnreachable(host: "192.168.1.20", localNetworkBlocked: true))
+        report.raised("custom EHOSTUNREACH on loopback is not a denial",
+                      CustomEndpointService.transportError(denied, baseURL: base),
+                      .endpointUnreachable(host: "localhost", localNetworkBlocked: false))
+        report.check("local-network error tells the user where the switch is",
+                     (AIServiceError.endpointUnreachable(host: "x", localNetworkBlocked: true)
+                        .recoverySuggestion ?? "").contains("Local Network"))
+
+        // Configured semantics: a base URL alone is enough; no key needed.
+        MainActor.assumeIsolated {
+            let suite = "com.aj.WriteBetter.selfcheck.custom"
+            let defaults = UserDefaults(suiteName: suite)!
+            defaults.removePersistentDomain(forName: suite)
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let store = SettingsStore(defaults: defaults, keychainService: "com.aj.WriteBetter.selfcheck")
+            report.check("custom is not configured without a base URL", !store.isUsable(.custom))
+            store.customBaseURL = "localhost:11434/v1"
+            report.check("custom is configured by a base URL alone", store.isUsable(.custom))
+            report.check("configuredProviders includes custom", store.configuredProviders.contains(.custom))
+            report.equal("custom has no default model id", store.modelID(for: .custom), "")
+            store.customBaseURL = "not a url at all"
+            report.check("a malformed base URL is not configured", !store.isUsable(.custom))
         }
     }
 
@@ -686,11 +849,61 @@ nonisolated enum WriteBetterSelfCheck {
             .rateLimited(retryAfter: 5), .rateLimited(retryAfter: nil), .quotaExceeded,
             .serverError(503), .timedOut, .offline, .network("dns"), .api("boom"),
             .invalidResponse, .emptyInput,
+            .endpointUnreachable(host: "h", localNetworkBlocked: false),
+            .endpointUnreachable(host: "h", localNetworkBlocked: true),
         ]
         report.check("every error has a description and a recovery hint",
                      allCases.allSatisfy {
                          !($0.errorDescription ?? "").isEmpty && !($0.recoverySuggestion ?? "").isEmpty
                      })
+    }
+
+    // MARK: Live smoke test (DEBUG only, explicit flag)
+
+    /// Drives the shipping service (transport, SSE framing, decoder, error mapping)
+    /// against a live server and prints what came back. Debug builds only; never runs
+    /// unless `--provider-smoke` is on the command line.
+    private static func providerSmoke(_ args: [String]) -> Bool {
+        func say(_ line: String) { print("[smoke] \(line)"); fflush(stdout) }
+        guard let kind = args.first else { say("usage: <custom> …"); return false }
+
+        let service: AIService
+        var modelsProbe: CustomEndpointService?
+        let text: String
+        switch kind {
+        case "custom":
+            guard args.count >= 4, let base = CustomEndpointService.normalizedBaseURL(args[1]) else {
+                say("usage: custom <baseURL> <modelID> <text…>"); return false
+            }
+            let endpoint = CustomEndpointService(modelID: args[2], apiKey: "", baseURL: base)
+            service = endpoint
+            modelsProbe = endpoint
+            text = args[3...].joined(separator: " ")
+        default:
+            say("unknown provider \(kind)"); return false
+        }
+
+        let done = DispatchSemaphore(value: 0)
+        var success = false
+        Task.detached {
+            defer { done.signal() }
+            say("validateKey: \(String(describing: await service.validateKey()))")
+            if let modelsProbe { say("models: \(String(describing: await modelsProbe.fetchModelIDs()))") }
+            var chunks = 0
+            var result = ""
+            do {
+                for try await chunk in service.improveTextStream(request: ImprovementRequest(originalText: text, action: .proofread)) {
+                    chunks += 1
+                    result += chunk
+                }
+                say("stream ok: \(chunks) chunks, result: \(result.debugDescription)")
+                success = !result.isEmpty
+            } catch {
+                say("stream error after \(chunks) chunks: \(error) (\((error as? AIServiceError)?.errorDescription ?? "-"))")
+            }
+        }
+        done.wait()
+        return success
     }
 
     // MARK: Stream driver (mirrors HTTPStream.run, without the network)

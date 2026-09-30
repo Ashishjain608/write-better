@@ -14,6 +14,7 @@ final class SettingsStore: ObservableObject {
     private enum Key {
         static let selectedProvider = "selectedProvider"
         static let modelIDs = "modelIDsByProvider"
+        static let customBaseURL = "customEndpointBaseURL"
         static let autoCaptureSelection = "autoCaptureSelection"
         static let launchAtLogin = "launchAtLogin"
         static let didMigrateLegacyKey = "didMigrateLegacyAnthropicKey"
@@ -28,8 +29,21 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Providers that currently hold a usable key.
+    /// Providers that are ready to run: a key (Anthropic, OpenAI, Gemini) or a base URL
+    /// (custom endpoint).
     @Published private(set) var configuredProviders: Set<AIProvider> = []
+
+    /// Base URL of the custom OpenAI-compatible endpoint, as typed.
+    @Published var customBaseURL: String {
+        didSet {
+            guard customBaseURL != oldValue else { return }
+            defaults.set(customBaseURL, forKey: Key.customBaseURL)
+            recomputeConfiguredProviders()
+        }
+    }
+
+    /// The normalized custom endpoint, or `nil` when unset or malformed.
+    var customEndpointURL: URL? { CustomEndpointService.normalizedBaseURL(customBaseURL) }
 
     /// Grab the current selection automatically when the popup opens.
     @Published var autoCaptureSelection: Bool {
@@ -66,6 +80,7 @@ final class SettingsStore: ObservableObject {
 
         let storedProvider = defaults.string(forKey: Key.selectedProvider)
         self.selectedProvider = storedProvider.flatMap(AIProvider.init(rawValue:)) ?? .anthropic
+        self.customBaseURL = defaults.string(forKey: Key.customBaseURL) ?? ""
         self.modelIDs = defaults.dictionary(forKey: Key.modelIDs) as? [String: String] ?? [:]
         self.autoCaptureSelection = defaults.bool(forKey: Key.autoCaptureSelection)
         self.launchAtLogin = defaults.bool(forKey: Key.launchAtLogin)
@@ -108,8 +123,16 @@ final class SettingsStore: ObservableObject {
         !apiKey(for: provider).isEmpty
     }
 
-    /// The selected provider has a usable key.
-    var isConfigured: Bool { hasKey(for: selectedProvider) }
+    /// The selected provider is ready to run.
+    var isConfigured: Bool { isUsable(selectedProvider) }
+
+    /// Ready to run: has the key it needs, or the address it needs.
+    func isUsable(_ provider: AIProvider) -> Bool {
+        switch provider {
+        case .anthropic, .openai, .gemini: return hasKey(for: provider)
+        case .custom: return customEndpointURL != nil
+        }
+    }
 
     // MARK: Model selection
 
@@ -139,7 +162,7 @@ final class SettingsStore: ObservableObject {
     // MARK: Internals
 
     private func recomputeConfiguredProviders() {
-        configuredProviders = Set(AIProvider.allCases.filter { !(keyCache[$0] ?? "").isEmpty })
+        configuredProviders = Set(AIProvider.allCases.filter(isUsable))
     }
 
     private func refreshKeyCache() {

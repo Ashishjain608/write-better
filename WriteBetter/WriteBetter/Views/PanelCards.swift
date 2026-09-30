@@ -266,10 +266,10 @@ struct SetupCard: View {
                             Image(systemName: provider.iconSymbol)
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(provider.accent)
-                            Text(provider.displayName)
+                            Text(provider.shortName)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.75)
-                            if configured.contains(provider) {
+                            if configured.contains(provider) && provider.needsAPIKey {
                                 Image(systemName: "key.fill")
                                     .font(.system(size: 9, weight: .semibold))
                                     .foregroundStyle(Theme.Color.success)
@@ -279,12 +279,21 @@ struct SetupCard: View {
                     }
                     .buttonStyle(ChipButtonStyle(isSelected: provider == selected))
                     .accessibilityLabel(provider.displayName)
-                    .accessibilityHint(configured.contains(provider) ? "Key saved" : "Needs an API key")
+                    .accessibilityHint(configured.contains(provider)
+                                       ? (provider.needsAPIKey ? "Key saved" : "Ready")
+                                       : (provider.needsAPIKey ? "Needs an API key" : "Set up in Settings"))
                     .accessibilityAddTraits(provider == selected ? [.isSelected] : [])
                 }
             }
 
-            InlineKeyField(provider: selected, key: $key, isValidating: isValidating, onSubmit: onSubmit)
+            if selected.needsAPIKey {
+                InlineKeyField(provider: selected, key: $key, isValidating: isValidating, onSubmit: onSubmit)
+            } else {
+                // No key to paste: a server address is entered in Settings → Providers.
+                Text("\(selected.displayName) is set up in Settings → Providers (⌘,).")
+                    .textStyle(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle.fill")
@@ -293,11 +302,13 @@ struct SetupCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.md) {
-                Text("Stored in your Mac's Keychain. Never leaves your device.")
-                    .textStyle(.caption)
-                Spacer(minLength: Theme.Space.md)
-                ConsoleLink(provider: selected)
+            if selected.needsAPIKey {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.md) {
+                    Text("Stored in your Mac's Keychain. Never leaves your device.")
+                        .textStyle(.caption)
+                    Spacer(minLength: Theme.Space.md)
+                    ConsoleLink(provider: selected)
+                }
             }
         }
         .padding(14)
