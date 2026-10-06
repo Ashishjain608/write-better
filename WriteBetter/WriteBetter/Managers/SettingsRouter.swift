@@ -65,11 +65,19 @@ final class SettingsRouter: ObservableObject {
         }
 
         NSApp.activate(ignoringOtherApps: true)
+        openSettings?()
+    }
 
-        // macOS 14 renamed the selector; try the new one, then the old.
-        let selectors = [Selector(("showSettingsWindow:")), Selector(("showPreferencesWindow:"))]
-        for selector in selectors where NSApp.sendAction(selector, to: nil, from: nil) {
-            return
-        }
+    /// SwiftUI's opener, handed over by `SettingsOpenerBridge`. Since macOS 14 it is
+    /// the only way to open the Settings scene: `showSettingsWindow:` is ignored.
+    var openSettings: OpenSettingsAction?
+}
+
+/// Captures `openSettings` from the scene's environment so AppKit callers can use it.
+struct SettingsOpenerBridge: ViewModifier {
+    @Environment(\.openSettings) private var openSettings
+
+    func body(content: Content) -> some View {
+        content.onAppear { SettingsRouter.shared.openSettings = openSettings }
     }
 }

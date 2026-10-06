@@ -234,7 +234,9 @@ sign_one() {
   if [ "$MODE" = "developer-id" ]; then
     codesign --force --options runtime --timestamp ${extra[@]+"${extra[@]}"} --sign "$SIGN_IDENTITY" "$1"
   else
-    codesign --force --options runtime ${extra[@]+"${extra[@]}"} --sign - "$1"
+    # No hardened runtime ad-hoc: its library validation rejects the ad-hoc
+    # Sparkle.framework ("different Team IDs") and the app dies at launch.
+    codesign --force ${extra[@]+"${extra[@]}"} --sign - "$1"
   fi
 }
 
@@ -250,7 +252,7 @@ if [ "$MODE" = "developer-id" ]; then
     --sign "$SIGN_IDENTITY" "$APP_PATH"
   good "signed with $SIGN_LABEL (hardened runtime + secure timestamp)"
 else
-  codesign --force --options runtime \
+  codesign --force \
     --entitlements "$ENTITLEMENTS" \
     --sign - "$APP_PATH"
   warn "ad-hoc signed (no identity) — not distributable without warnings"

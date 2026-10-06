@@ -19,6 +19,7 @@ struct WriteBetterApp: App {
             MenuBarIconView(state: appDelegate.isWorking
                             ? .working
                             : (settings.configuredProviders.isEmpty ? .needsSetup : .ready))
+                .modifier(SettingsOpenerBridge())
         }
         .menuBarExtraStyle(.menu)
 
