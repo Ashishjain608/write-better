@@ -43,11 +43,6 @@
    "license": "https://opensource.org/licenses/MIT",
    "isAccessibleForFree": true,
    "image": "https://qriousguy.com/write-better/screenshots/og.png",
-   "screenshot": [
-    "https://qriousguy.com/write-better/screenshots/panel-light.png",
-    "https://qriousguy.com/write-better/screenshots/panel-dark.png",
-    "https://qriousguy.com/write-better/screenshots/settings.png"
-   ],
    "featureList": [
     "⇧⌘Space opens a floating panel that streams a rewrite of copied or selected text",
     "Copy the result, or replace the original in place",
@@ -414,11 +409,13 @@
            is fine) in each appearance; they swap with the visitor's system theme. -->
       <figure class="hero-media reveal">
         <!-- REAL-SCREENSHOT-NEEDED: the panel mid-rewrite over a real email draft at 1040x760, once in light (panel-light.png) and once in dark (panel-dark.png) -->
-        <picture>
+        <!-- HIDDEN until real screenshots exist: restore this <picture> when panel-*.png are real captures
+<picture>
           <source srcset="screenshots/panel-dark.png" media="(prefers-color-scheme: dark)">
           <img class="shot" src="screenshots/panel-light.png" width="1040" height="760"
                alt="The WriteBetter panel floating over an email draft, streaming a clearer rewrite, with quick actions along the top.">
         </picture>
+-->
         <figcaption class="hero-caption"><kbd>↩</kbd> copies · <kbd>⌘↩</kbd> replaces in place · <kbd>esc</kbd> cancels</figcaption>
       </figure>
 
@@ -499,7 +496,7 @@
         <h2 class="h2">Your key, <span class="dim">or no key at all.</span></h2>
         <p class="lede">Seven providers. Pick one in Settings, then switch between them from the panel.</p>
       </div>
-      <div class="split">
+      <div class="split" style="grid-template-columns:minmax(0,1fr)">
         <ul class="providers reveal">
           <li>
             <h3 class="h3">Claude, GPT and Gemini</h3>
@@ -518,11 +515,13 @@
             <p class="body">On macOS 26 with Apple Silicon: free, offline, and no key to set up.</p>
           </li>
         </ul>
-        <figure class="reveal">
-          <!-- REAL-SCREENSHOT-NEEDED: Settings > Providers tab at 1300x900 with the provider list visible, including Claude Code CLI and Codex CLI rows; use dummy keys -->
+        <!-- HIDDEN until settings.png is a real capture; also drop the inline style on .split above
+<figure class="reveal">
+          <!~~ REAL-SCREENSHOT-NEEDED: Settings > Providers tab at 1300x900 with the provider list visible, including Claude Code CLI and Codex CLI rows; use dummy keys ~~>
           <img class="shot" src="screenshots/settings.png" width="1300" height="900" loading="lazy"
                alt="WriteBetter Settings, Providers tab: Anthropic, OpenAI and Gemini keys, a custom OpenAI-compatible endpoint, Apple's on-device model, and the Claude Code and Codex CLIs.">
         </figure>
+-->
       </div>
     </div>
   </section>
