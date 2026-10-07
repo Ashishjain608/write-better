@@ -14,7 +14,7 @@ cask "writebetter" do
   homepage "https://github.com/Ashishjain608/write-better"
 
   auto_updates true
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "WriteBetter.app"
 
