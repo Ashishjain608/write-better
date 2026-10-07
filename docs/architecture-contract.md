@@ -1,6 +1,6 @@
 # WriteBetter v1.0 — Shared Contract (authoritative)
 
-Repo: `/Users/ashishjain/dev/write-better`
+Repo: this repository (paths below are relative to its root)
 App sources: `WriteBetter/WriteBetter/`
 
 All agents MUST obey this file. If something here conflicts with your own judgement,
@@ -26,7 +26,7 @@ follow this file — another agent is coding against it.
 |-------|-------------------------------|
 | **P — Providers** | `WriteBetter/WriteBetter/Services/**`, `WriteBetter/WriteBetter/Models/**`, `WriteBetter/WriteBetter/Utils/**` |
 | **U — UX** | `WriteBetter/WriteBetter/Views/**`, `WriteBetter/WriteBetter/Managers/**`, `WriteBetter/WriteBetter/WriteBetterApp.swift` |
-| **D — Packaging** | `WriteBetter/WriteBetter.xcodeproj/project.pbxproj`, `WriteBetter/WriteBetter/Info.plist`, `WriteBetter/WriteBetter/WriteBetter.entitlements`, `WriteBetter/WriteBetter/Assets.xcassets/**`, `WriteBetter/ExportOptions.plist`, `scripts/**`, `create-dmg.sh`, `Installer/**`, `README.md`, `SETUP.md`, `.gitignore` |
+| **D — Packaging** | `WriteBetter/WriteBetter.xcodeproj/project.pbxproj`, `WriteBetter/WriteBetter/Info.plist`, `WriteBetter/WriteBetter/WriteBetter.entitlements`, `WriteBetter/WriteBetter/Assets.xcassets/**`, `scripts/**`, `create-dmg.sh`, `packaging/**`, `.github/**`, `README.md`, `SETUP.md`, `.gitignore` |
 
 Nobody edits another agent's files. Nobody runs `git commit`, `git add`, `git checkout`,
 `git stash`, or `git restore`. The orchestrator integrates.

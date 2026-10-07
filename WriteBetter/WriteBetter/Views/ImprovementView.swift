@@ -253,6 +253,14 @@ struct ImprovementView: View {
                 }
             }
             resultSurface
+            if case .cancelled = controller.phase, let error = controller.cutOffError {
+                CutOffNotice(error: error)
+            } else if case .done = controller.phase, controller.wasTruncated {
+                Label(controller.replaceabilityBlocker ?? "Only the first 20,000 characters were rewritten.",
+                      systemImage: "exclamationmark.circle.fill")
+                    .textStyle(.caption)
+                    .foregroundStyle(Theme.Color.warning)
+            }
         }
     }
 
@@ -270,7 +278,7 @@ struct ImprovementView: View {
         case .streaming, .capturing:
             StatusPill(text: "Streaming", tint: Theme.Color.streaming, showsDot: true)
         case .cancelled:
-            StatusPill(text: "Stopped", tint: Theme.Color.warning,
+            StatusPill(text: controller.wasCutOff ? "Cut off" : "Stopped", tint: Theme.Color.warning,
                        systemImage: "exclamationmark.circle.fill")
         case .validating:
             StatusPill(text: "Checking", tint: Theme.Color.accent, showsDot: true)
@@ -613,7 +621,7 @@ struct ImprovementView: View {
             HStack(spacing: Theme.Space.md) {
                 Button(replaceTitle) { replace() }
                     .buttonStyle(SecondaryButtonStyle())
-                    .disabled(!controller.hasResult)
+                    .disabled(!controller.isResultReplaceable)
                     .help(controller.canReplaceInPlace
                           ? "Paste back into the app you came from (⌘↩)"
                           : "Needs Accessibility access")
@@ -864,6 +872,10 @@ struct ImprovementView: View {
 
     private func replace() {
         guard controller.hasResult else { return }
+        if controller.replaceabilityBlocker != nil {
+            controller.replaceInPlace() // announces the blocker
+            return
+        }
         guard controller.canReplaceInPlace else {
             withAnimation(Theme.Motion.curve(Theme.Motion.quick, reduceMotion: reduceMotion)) {
                 showPermissionExplainer = true

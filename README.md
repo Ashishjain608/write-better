@@ -1,8 +1,8 @@
 # WriteBetter
 
 A menu-bar utility for macOS that rewrites whatever text you have on hand.
-Copy something, press `⇧⌘Space`, and a floating panel streams a better version
-back at you — then you copy it or paste it straight back where it came from.
+Copy something, press `⇧⌘Space`, and a floating panel shows a better version
+— then you copy it or paste it straight back where it came from.
 
 No Dock icon, no window to manage, no account. Your API key stays in your Mac's
 Keychain and the text goes to the provider you chose and nowhere else.
@@ -11,13 +11,21 @@ Keychain and the text goes to the provider you chose and nowhere else.
 
 ## What it does
 
-- **Three providers, your key.** Anthropic (Claude), OpenAI (GPT) and Google
-  Gemini. Add a key for any or all of them in Settings and switch between them
-  from the panel.
-- **Streaming.** The first words appear while the rest is still being written.
-  `esc` cancels the request for real, and you keep whatever arrived.
+- **Seven providers.** Anthropic (Claude), OpenAI (GPT), Google Gemini, a custom
+  OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter), Apple on-device
+  (macOS 26 with Apple Intelligence), and your logged-in Claude Code (`claude`)
+  or Codex (`codex`) CLI. Switch between them from the panel.
+- **No API key needed for the CLIs.** Claude Code and Codex rewrites run through
+  the CLI you already use and are billed to that subscription. The answer
+  arrives in one piece, not streamed, and there is an effort picker (`low` by
+  default).
+- **Streaming.** With the API providers the first words appear while the rest is
+  still being written. `esc` cancels the request for real, and you keep whatever
+  arrived.
 - **Quick actions.** Fix Grammar, Clarify, Shorten, Professional, Friendly —
   one click or `⌘1`…`⌘5`.
+- **Saved actions.** Keep up to four of your own prompts on `⌘6`…`⌘9`. Manage
+  them in Settings → Actions, or use "Save as action" from `⌘K`.
 - **Free-form prompts.** `⌘K`, tell it what you actually want, `⌘↩`.
 - **Clipboard-first capture.** By default WriteBetter reads your clipboard, so
   it needs no permissions at all: copy with `⌘C`, then hit the hotkey.
@@ -29,31 +37,30 @@ Keychain and the text goes to the provider you chose and nowhere else.
 ## Requirements
 
 - macOS **14.0** (Sonoma) or later, Apple Silicon or Intel.
-- An API key from at least one of:
+- An API key from at least one of
   [Anthropic](https://console.anthropic.com/settings/keys) ·
   [OpenAI](https://platform.openai.com/api-keys) ·
-  [Google AI Studio](https://aistudio.google.com/apikey)
+  [Google AI Studio](https://aistudio.google.com/apikey),
+  **or** a custom endpoint, Apple on-device, or a logged-in `claude` or `codex`
+  CLI. No API key is needed for those.
 
-Keys are billed by the provider, per token. WriteBetter has no server, no
+API keys are billed by the provider, per token. The CLI providers are billed to
+your Claude Code or Codex subscription. WriteBetter has no server, no
 account and no telemetry.
 
 ## Install
 
-Download the DMG from
-[Releases](https://github.com/ashishjain/write-better/releases), open it, and
-drag **WriteBetter** to **Applications**. Launch it — the caret icon appears in
-your menu bar. Click it → **Settings…** → paste a key → **Test**.
+Download `WriteBetter.dmg` from
+[Releases](https://github.com/Ashishjain608/write-better/releases), open it, and
+drag **WriteBetter** to **Applications**. Or with Homebrew:
 
-> **If macOS says "WriteBetter is damaged and can't be opened":** it isn't. That
-> is what macOS 15+ says about an app that has not been notarized by Apple, and
-> the old right-click → Open override no longer works. Open
-> **System Settings → Privacy & Security**, scroll to **Security**, click
-> **Open Anyway** next to WriteBetter, and confirm. Once per version.
->
-> (Do not run `xattr -dr com.apple.quarantine` on it. It works, but it also
-> switches off the malware scan that quarantine triggers, and pasting shell
-> commands off a web page to make a security warning go away is a habit worth
-> not having.)
+```bash
+brew install --cask ashishjain608/tap/writebetter
+```
+
+Launch it. The caret icon appears in your menu bar. Click it → **Settings…** →
+paste a key → **Test**. (For Claude Code or Codex, pick that provider instead;
+no key is needed.) WriteBetter checks for updates itself.
 
 ## Using it
 
@@ -87,7 +94,7 @@ app is running, WriteBetter picks it up within a second — no restart.
 ## Building from source
 
 ```bash
-git clone https://github.com/ashishjain/write-better.git
+git clone https://github.com/Ashishjain608/write-better.git
 cd write-better
 open WriteBetter/WriteBetter.xcodeproj      # then ⌘R
 ```
@@ -100,72 +107,20 @@ xcodebuild -project WriteBetter/WriteBetter.xcodeproj \
            -derivedDataPath build/DerivedData build
 ```
 
-Requirements: Xcode 16 or later. Zero third-party dependencies — no SPM
-packages, no CocoaPods, nothing to install first.
+Requirements: Xcode 26 or later. One dependency, Sparkle 2, which Xcode fetches
+as a Swift package on first open.
 
 The Xcode project uses a **file-system-synchronized group**: any `.swift` file
 you drop under `WriteBetter/WriteBetter/` is compiled automatically. You do not
 edit `project.pbxproj` to add sources.
 
 See [SETUP.md](SETUP.md) for the project layout, the build settings that matter,
-and how the artwork and installer are generated.
+and how the artwork and DMG are generated.
 
 ## Releasing
 
-```bash
-./create-dmg.sh                        # build, sign, package, verify
-./create-dmg.sh --app /path/to/App.app # package an existing bundle only
-```
-
-The script writes `dist/WriteBetter-Installer.dmg`: a plain drag-to-Applications
-disk image with branded background art, a custom volume icon and no Finder
-chrome. It always tells you which of the two signing worlds you are in.
-
-**Release checklist**
-
-1. `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` bumped in
-   `WriteBetter.xcodeproj` (they flow into `Info.plist` automatically).
-2. `./scripts/make-icons.sh` if the mark changed.
-3. `./create-dmg.sh` — it must end with `layout verified against the .DS_Store`.
-4. Mount the DMG and look at it: background, arrow, both icons at the same
-   height, app icon on the volume.
-5. Install from the DMG on a clean account and check the hotkey, one improvement
-   per provider, and the Accessibility flow.
-6. Upload to GitHub Releases with the version in the tag.
-7. If the build was not notarized, say so in the release notes and repeat the
-   "Open Anyway" instructions there.
-
-### If you get a Developer ID
-
-This is the one thing standing between the current build and a normal install
-experience. Once you have an Apple Developer Program membership ($99/yr) and a
-**Developer ID Application** certificate in your login keychain, `create-dmg.sh`
-picks it up automatically — `security find-identity -v -p codesigning` is all it
-looks at. Then:
-
-```bash
-# once: store an App Store Connect API key as a notarytool keychain profile
-xcrun notarytool store-credentials WriteBetterNotary \
-  --key ~/keys/AuthKey_XXXXXXXXXX.p8 --key-id XXXXXXXXXX --issuer <issuer-uuid>
-
-export WRITEBETTER_NOTARY_PROFILE=WriteBetterNotary
-./create-dmg.sh
-```
-
-The script will then sign with `--options runtime --timestamp`, submit to
-`notarytool` and wait, staple the ticket to the app, rebuild the DMG around the
-stapled app, sign and staple the DMG too, and verify with `codesign --verify
---deep --strict` and `spctl`. The Gatekeeper warning disappears from the DMG
-background art on its own, because the art is generated per build.
-
-If you prefer raw API-key credentials over a keychain profile, set
-`WRITEBETTER_NOTARY_KEY`, `WRITEBETTER_NOTARY_KEY_ID` and
-`WRITEBETTER_NOTARY_ISSUER` instead; both paths are supported.
-
-After that, a [Homebrew Cask](https://docs.brew.sh/Adding-Software-to-Homebrew)
-becomes worth doing — `brew install --cask writebetter` gives users
-install/upgrade/uninstall for free. It is not worth submitting before
-notarization works, because `brew` cannot route around Gatekeeper either.
+Push a tag like `v1.2.0`; GitHub Actions builds the DMG and publishes the
+release. See [SETUP.md](SETUP.md#7-releasing-and-auto-update).
 
 ## Licence
 

@@ -6,7 +6,7 @@ Machine facts verified during research (2026-08-05): macOS 26.5.2 "Tahoe" (build
 
 ## Recommendation (do this, in order)
 
-1. **Buy the $99/yr Apple Developer Program membership.** This is the one blocker that actually matters. Everything else (styled DMG, background art, drag-arrow) is cosmetic; the lack of a Developer ID certificate is the reason every user who downloads `WriteBetter-Installer.dmg` today will hit a **"WriteBetter is damaged and can't be opened, move it to Trash"** dialog on macOS 15/26 (ad-hoc/unsigned quarantined app + Gatekeeper, not a real corruption — see §4). Without a paid account there is no code path to a normal install experience for a menu-bar utility that needs Accessibility + network permissions; every alternative is a support burden shifted onto the user (`xattr -dr`, `spctl --master-disable`, multi-click System Settings dance). [swissmacuser.ch](https://swissmacuser.ch/fix-macos-tahoe-app-is-damaged-and-cant-be-opened-move-trash/), [eclecticlight.co](https://eclecticlight.co/2024/10/01/living-without-notarization/), [developer.apple.com/news](https://developer.apple.com/news/?id=saqachfa)
+1. **Buy the $99/yr Apple Developer Program membership.** This is the one blocker that actually matters. Everything else (styled DMG, background art, drag-arrow) is cosmetic; the lack of a Developer ID certificate is the reason every user who downloads `WriteBetter.dmg` today will hit a **"WriteBetter is damaged and can't be opened, move it to Trash"** dialog on macOS 15/26 (ad-hoc/unsigned quarantined app + Gatekeeper, not a real corruption — see §4). Without a paid account there is no code path to a normal install experience for a menu-bar utility that needs Accessibility + network permissions; every alternative is a support burden shifted onto the user (`xattr -dr`, `spctl --master-disable`, multi-click System Settings dance). [swissmacuser.ch](https://swissmacuser.ch/fix-macos-tahoe-app-is-damaged-and-cant-be-opened-move-trash/), [eclecticlight.co](https://eclecticlight.co/2024/10/01/living-without-notarization/), [developer.apple.com/news](https://developer.apple.com/news/?id=saqachfa)
 
 2. **Rewrite `create-dmg.sh` as a graceful-degradation build script** (design in §5) that:
    - Runs `security find-identity -v -p codesigning` at build time.
@@ -64,7 +64,7 @@ APP="WriteBetter.app"
 VOLNAME="WriteBetter"
 STAGE="dmg-stage"
 DMG_TMP="pack.dmg"
-DMG_FINAL="WriteBetter-Installer.dmg"
+DMG_FINAL="WriteBetter.dmg"
 WINX=200 WINY=120 WINW=660 WINH=400
 ICON_SIZE=128
 
@@ -192,11 +192,11 @@ xcrun notarytool submit "WriteBetter.zip" --keychain-profile "WriteBetterNotary"
 # the DMG around the stapled .app, then ALSO staple the .dmg itself)
 xcrun stapler staple "WriteBetter.app"
 # ... build the dmg from the stapled .app (§ recipe) ...
-xcrun stapler staple "WriteBetter-Installer.dmg"
+xcrun stapler staple "WriteBetter.dmg"
 
 # Verify end to end
 spctl -a -vvv -t exec WriteBetter.app
-spctl -a -vvv -t open --context context:primary-signature WriteBetter-Installer.dmg
+spctl -a -vvv -t open --context context:primary-signature WriteBetter.dmg
 ```
 
 The App Store Connect **API key** method (`--key`/`--key-id`/`--issuer`) is the current recommended auth path — it's what Apple's own docs and every current guide use — versus the legacy Apple ID + app-specific-password method, which still works but is considered the older/less preferred flow. `notarytool` has fully replaced `altool` for notarization (`altool` submission for notarization was sunset in late 2023). Both the `.app` (recommended, so it's valid however it's later repackaged — zip, dmg, pkg) and the `.dmg` should be stapled if you're distributing the DMG directly, since `spctl` on the mounted volume checks the outer container too. [Apple's official notarization doc exists at developer.apple.com/documentation/security/notarizing-macos-software-before-distribution — **could not fetch full body text (two attempts returned only the page title / a truncation notice); the command sequence above is corroborated by multiple independent secondary sources (Scripting OS X, Reverse Society blog, GuillaumeFalourd/notary-tools) and is consistent with Apple's stated flow, but flagging that I could not directly quote Apple's own page text.] [scriptingosx.com — Notarize a Command Line Tool with notarytool](https://scriptingosx.com/2021/07/notarize-a-command-line-tool-with-notarytool/), [tonygo.tech — Complete Guide to Notarizing macOS Apps](https://tonygo.tech/blog/2023/notarization-for-macos-app-with-notarytool)

@@ -284,7 +284,8 @@ struct SetupCard: View {
         VStack(alignment: .leading, spacing: Theme.Space.lg) {
             SectionHeader("Get started")
 
-            HStack(spacing: Theme.Space.md) {
+            // 7 chips don't fit one row at 560pt: wrap into rows of ~4.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: Theme.Space.md)], spacing: Theme.Space.md) {
                 ForEach(providers) { provider in
                     Button { onSelect(provider) } label: {
                         HStack(spacing: Theme.Space.sm) {

@@ -5,6 +5,8 @@ project itself.
 
 ---
 
+> Cutting a release? Jump to [§7 Releasing and auto-update](#7-releasing-and-auto-update): push a `vX.Y.Z` tag.
+
 ## 1. Get it building
 
 ```bash

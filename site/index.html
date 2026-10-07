@@ -8,9 +8,9 @@
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#F0F1F5" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#070910" media="(prefers-color-scheme: dark)">
-<meta name="description" content="A free, open-source macOS menu-bar app. Copy or select text, press ⇧⌘Space, and a floating panel streams a rewrite from Claude, GPT, Gemini, a local model, or Apple's on-device model. No account, no server.">
+<meta name="description" content="A free, open-source macOS menu-bar app. Copy or select text, press ⇧⌘Space, and a floating panel streams a rewrite from Claude, GPT, Gemini, a local model, Apple's on-device model, or your logged-in Claude Code or Codex CLI. No account, no server.">
 <meta property="og:title" content="WriteBetter — rewrite any text on your Mac, with the model you choose">
-<meta property="og:description" content="Press ⇧⌘Space on any text and a floating panel streams a rewrite. Your own key, a local model, or Apple's on-device model. Free and open source.">
+<meta property="og:description" content="Press ⇧⌘Space on any text and a floating panel streams a rewrite. Your own key, a local model, Apple's on-device model, or your Claude Code or Codex subscription. Free and open source.">
 <meta property="og:image" content="https://qriousguy.com/write-better/screenshots/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -30,7 +30,7 @@
    "@id": "https://qriousguy.com/write-better/#app",
    "name": "WriteBetter",
    "url": "https://qriousguy.com/write-better/",
-   "description": "A macOS menu-bar app that rewrites text with your own AI. Copy or select text, press ⇧⌘Space, and a floating panel streams a rewrite from Claude, GPT, Gemini, any OpenAI-compatible endpoint, or Apple's on-device model. No server, no account, and no telemetry in the app.",
+   "description": "A macOS menu-bar app that rewrites text with your own AI. Copy or select text, press ⇧⌘Space, and a floating panel streams a rewrite from Claude, GPT, Gemini, any OpenAI-compatible endpoint, Apple's on-device model, or your logged-in Claude Code or Codex CLI. No server, no account, and no telemetry in the app.",
    "applicationCategory": "UtilitiesApplication",
    "operatingSystem": "macOS 14 or later",
    "offers": {
@@ -38,7 +38,7 @@
     "price": "0",
     "priceCurrency": "USD"
    },
-   "downloadUrl": "https://github.com/Ashishjain608/write-better/releases/latest/download/WriteBetter.dmg",
+   "downloadUrl": "https://github.com/Ashishjain608/write-better/releases/latest",
    "installUrl": "https://qriousguy.com/write-better/",
    "license": "https://opensource.org/licenses/MIT",
    "isAccessibleForFree": true,
@@ -56,6 +56,7 @@
     "Anthropic, OpenAI and Google Gemini with your own key, stored in the macOS Keychain",
     "Any OpenAI-compatible endpoint, including Ollama, LM Studio and OpenRouter",
     "Apple's on-device model on macOS 26 with Apple Silicon",
+    "Claude Code CLI and Codex CLI: rewrites run through your logged-in CLI, billed to that subscription, no API key needed",
     "No server, no account, no telemetry in the app"
    ],
    "author": {
@@ -91,7 +92,7 @@
      "name": "Is WriteBetter free?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Yes. It's MIT-licensed open source, with no paid tier and no account. A cloud provider bills you for what you use on your own key. Local models and Apple's on-device model cost nothing."
+      "text": "Yes. It's MIT-licensed open source, with no paid tier and no account. A cloud provider bills you for what you use on your own key. Local models and Apple's on-device model cost nothing, and the Claude Code and Codex CLI providers use the subscription you already pay for."
      }
     },
     {
@@ -107,7 +108,7 @@
      "name": "Where does my text go?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Only to the provider you pick. There's no WriteBetter server, and the app has no telemetry. With a local model or Apple's on-device model, your text stays on your Mac."
+      "text": "Only to the provider you pick. There's no WriteBetter server, and the app has no telemetry. With a local model or Apple's on-device model, your text stays on your Mac. With the Claude Code or Codex CLI provider, it goes where that CLI sends it."
      }
     },
     {
@@ -191,6 +192,8 @@
   h1,h2,h3,p,figure,pre,dl,dd{margin:0}
   ol,ul{margin:0;padding:0;list-style:none}
   a{color:inherit}
+  .body code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}
+  .body a{text-decoration:underline;text-underline-offset:3px}
   img{max-width:100%;height:auto;display:block}
   svg{flex:none}
   ::selection{background:var(--accent);color:#fff}
@@ -378,7 +381,7 @@
       <a class="gh-link" href="https://github.com/Ashishjain608/write-better" target="_blank" rel="noopener" title="View the source code on GitHub">
         <svg class="ico" aria-hidden="true"><use href="#i-github"/></svg><span>Source</span>
       </a>
-      <a class="btn btn-primary btn-sm" href="https://github.com/Ashishjain608/write-better/releases/latest/download/WriteBetter.dmg">Download</a>
+      <a class="btn btn-primary btn-sm" href="https://github.com/Ashishjain608/write-better/releases/latest">Download</a>
     </div>
   </div>
 </header>
@@ -397,7 +400,7 @@
           version from the model you choose. <kbd>↩</kbd> copies it; <kbd>⌘↩</kbd> puts it back where it came from.
         </p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/Ashishjain608/write-better/releases/latest/download/WriteBetter.dmg">
+          <a class="btn btn-primary" href="https://github.com/Ashishjain608/write-better/releases/latest">
             <svg class="ico" aria-hidden="true"><use href="#i-download"/></svg>Download for macOS
           </a>
           <a class="btn btn-ghost" href="https://github.com/Ashishjain608/write-better" target="_blank" rel="noopener">
@@ -410,6 +413,7 @@
       <!-- Screenshots: capture the panel mid-rewrite at ~1040×760 (same ratio at 2×
            is fine) in each appearance; they swap with the visitor's system theme. -->
       <figure class="hero-media reveal">
+        <!-- REAL-SCREENSHOT-NEEDED: the panel mid-rewrite over a real email draft at 1040x760, once in light (panel-light.png) and once in dark (panel-dark.png) -->
         <picture>
           <source srcset="screenshots/panel-dark.png" media="(prefers-color-scheme: dark)">
           <img class="shot" src="screenshots/panel-light.png" width="1040" height="760"
@@ -493,7 +497,7 @@
       <div class="reveal">
         <p class="kicker">Models</p>
         <h2 class="h2">Your key, <span class="dim">or no key at all.</span></h2>
-        <p class="lede">Pick a provider in Settings, then switch between them from the panel.</p>
+        <p class="lede">Seven providers. Pick one in Settings, then switch between them from the panel.</p>
       </div>
       <div class="split">
         <ul class="providers reveal">
@@ -506,15 +510,49 @@
             <p class="body">Ollama, LM Studio, OpenRouter, or your own server. Point it at a model on your Mac and nothing leaves it.</p>
           </li>
           <li>
+            <h3 class="h3">Claude Code and Codex CLI<span class="new">New</span></h3>
+            <p class="body">Already logged in to <code>claude</code> or <code>codex</code>? Rewrites run through it and bill to that subscription. No API key. Each rewrite arrives in one piece, not streamed, and runs with tools off at low effort by default.</p>
+          </li>
+          <li>
             <h3 class="h3">Apple's on-device model<span class="new">New</span></h3>
             <p class="body">On macOS 26 with Apple Silicon: free, offline, and no key to set up.</p>
           </li>
         </ul>
         <figure class="reveal">
+          <!-- REAL-SCREENSHOT-NEEDED: Settings > Providers tab at 1300x900 with the provider list visible, including Claude Code CLI and Codex CLI rows; use dummy keys -->
           <img class="shot" src="screenshots/settings.png" width="1300" height="900" loading="lazy"
-               alt="WriteBetter Settings, Providers tab: Anthropic, OpenAI and Gemini keys, a custom OpenAI-compatible endpoint, and Apple's on-device model.">
+               alt="WriteBetter Settings, Providers tab: Anthropic, OpenAI and Gemini keys, a custom OpenAI-compatible endpoint, Apple's on-device model, and the Claude Code and Codex CLIs.">
         </figure>
       </div>
+    </div>
+  </section>
+
+  <!-- ======================================================================= ARCHITECTURE -->
+  <section class="section band" id="architecture">
+    <div class="container">
+      <div class="reveal">
+        <p class="kicker">How it's built</p>
+        <h2 class="h2">A small native app. <span class="dim">One hop to the model.</span></h2>
+        <p class="lede">Pure Swift and SwiftUI, no web view, no backend. Your text takes one of three routes.</p>
+      </div>
+      <ol class="steps reveal">
+        <li>
+          <span class="step-num">A</span>
+          <h3 class="h3">HTTPS to a provider</h3>
+          <p class="body">Anthropic, OpenAI, Gemini or your own OpenAI-compatible endpoint. The reply streams back token by token, using your key from the Keychain.</p>
+        </li>
+        <li>
+          <span class="step-num">B</span>
+          <h3 class="h3">Your logged-in CLI</h3>
+          <p class="body">The app runs <code>claude</code> or <code>codex</code> once per rewrite, in a throwaway folder, tools off, no session saved. The prompt goes in, the answer comes back.</p>
+        </li>
+        <li>
+          <span class="step-num">C</span>
+          <h3 class="h3">Apple's on-device model</h3>
+          <p class="body">Handled by macOS itself. Nothing leaves the Mac.</p>
+        </li>
+      </ol>
+      <p class="body reveal" style="margin-top:32px">Read every line on <a href="https://github.com/Ashishjain608/write-better" target="_blank" rel="noopener">GitHub</a>. Questions or ideas? <a href="https://qriousguy.com/#contact">Get in touch</a>.</p>
     </div>
   </section>
 
@@ -572,7 +610,7 @@
         <li>
           <span class="step-num">04</span>
           <h3 class="h3">Pick a model</h3>
-          <p class="body">Click the caret, choose Settings, and add a key, a local endpoint, or Apple's model.</p>
+          <p class="body">Click the caret, choose Settings, and add a key, a local endpoint, Apple's model, or your Claude Code or Codex login.</p>
         </li>
       </ol>
       <div class="brew reveal">
@@ -596,7 +634,7 @@
       <div class="faq reveal">
         <div class="qa">
           <h3 class="h3">Is WriteBetter free?</h3>
-          <p class="body">Yes. It's MIT-licensed open source, with no paid tier and no account. A cloud provider bills you for what you use on your own key. Local models and Apple's on-device model cost nothing.</p>
+          <p class="body">Yes. It's MIT-licensed open source, with no paid tier and no account. A cloud provider bills you for what you use on your own key. Local models and Apple's on-device model cost nothing, and the Claude Code and Codex CLI providers use the subscription you already pay for.</p>
         </div>
         <div class="qa">
           <h3 class="h3">How is it different from Apple's Writing Tools?</h3>
@@ -604,7 +642,7 @@
         </div>
         <div class="qa">
           <h3 class="h3">Where does my text go?</h3>
-          <p class="body">Only to the provider you pick. There's no WriteBetter server, and the app has no telemetry. With a local model or Apple's on-device model, your text stays on your Mac.</p>
+          <p class="body">Only to the provider you pick. There's no WriteBetter server, and the app has no telemetry. With a local model or Apple's on-device model, your text stays on your Mac. With the Claude Code or Codex CLI provider, it goes where that CLI sends it.</p>
         </div>
         <div class="qa">
           <h3 class="h3">What permissions does it need?</h3>
@@ -625,7 +663,7 @@
         <h2 class="h2">Better writing, <span class="dim">one shortcut away.</span></h2>
         <p class="lede">Free, open source, and your text goes only where you send it.</p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/Ashishjain608/write-better/releases/latest/download/WriteBetter.dmg">
+          <a class="btn btn-primary" href="https://github.com/Ashishjain608/write-better/releases/latest">
             <svg class="ico" aria-hidden="true"><use href="#i-download"/></svg>Download for macOS
           </a>
           <a class="btn btn-ghost" href="https://github.com/Ashishjain608/write-better" target="_blank" rel="noopener">
@@ -664,13 +702,12 @@
 
 <script>
   (function () {
-    // The Download buttons point at releases/latest/download/WriteBetter.dmg, a stable
-    // name every release uploads, so they never depend on this (rate-limited) call.
-    // It only fills in the version and size line under the hero buttons.
+    // The Download buttons point at the latest-release page, so they never depend on this
+    // (rate-limited) call. It only fills in the version and size line under the hero buttons.
     fetch('https://api.github.com/repos/Ashishjain608/write-better/releases/latest')
       .then(function (r) { if (!r.ok) throw new Error('bad status'); return r.json(); })
       .then(function (data) {
-        var dmg = (data.assets || []).find(function (a) { return a.name === 'WriteBetter.dmg'; });
+        var dmg = (data.assets || []).find(function (a) { return /\.dmg$/.test(a.name); });
         var meta = document.getElementById('release-meta');
         if (dmg && meta && data.tag_name) {
           meta.textContent = data.tag_name + ' · ' + (dmg.size / 1048576).toFixed(1) + ' MB · Apple Silicon & Intel · macOS 14+';

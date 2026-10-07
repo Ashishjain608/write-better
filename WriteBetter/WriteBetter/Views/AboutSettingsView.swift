@@ -136,6 +136,7 @@ struct AboutSettingsView: View {
         for provider in AIProvider.allCases {
             settings.setAPIKey("", for: provider)
         }
+        settings.customBaseURL = ""
         settings.autoCaptureSelection = false
         settings.launchAtLogin = false
         try? LaunchAtLoginManager.apply(false)

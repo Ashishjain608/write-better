@@ -68,14 +68,15 @@ nonisolated struct CLIService: AIService {
 
     func improveTextStream(request improvement: ImprovementRequest) -> AsyncThrowingStream<String, Error> {
         let process = Process()
+        let cancelled = CancelFlag()
         return AsyncThrowingStream { continuation in
-            continuation.onTermination = { _ in if process.isRunning { process.terminate() } }
+            continuation.onTermination = { _ in cancelled.set(); Self.stop(process) }
             guard !improvement.isEmpty else { continuation.finish(throwing: AIServiceError.emptyInput); return }
             let arguments = arguments(for: improvement)
             let input = stdinPrompt(for: improvement)
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    let output = try run(process, arguments: arguments, stdin: input)
+                    let output = try run(process, cancelled: cancelled, arguments: arguments, stdin: input)
                     var text = output
                     while text.hasSuffix("\n") { text.removeLast() }
                     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -114,7 +115,7 @@ nonisolated struct CLIService: AIService {
     ///
     /// stdin and stderr go through files in a throwaway directory (which is also the
     /// working directory), so no pipe can fill up and deadlock.
-    private func run(_ process: Process, arguments: [String], stdin: String) throws -> String {
+    private func run(_ process: Process, cancelled: CancelFlag = CancelFlag(), arguments: [String], stdin: String) throws -> String {
         guard let executable = Self.executable(for: provider) else { throw AIServiceError.missingKey(provider) }
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("WriteBetter-\(UUID().uuidString)")
@@ -138,11 +139,13 @@ nonisolated struct CLIService: AIService {
         process.standardOutput = stdout
         process.standardError = try FileHandle(forWritingTo: errURL)
 
-        let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        let timeout = DispatchWorkItem { Self.stop(process) }
         DispatchQueue.global().asyncAfter(deadline: .now() + Constants.overallTimeout, execute: timeout)
         defer { timeout.cancel() }
 
         try process.run()
+        // esc can land between stream creation and launch, when stop() found nothing to kill.
+        if cancelled.value { Self.stop(process) }
         let out = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         process.waitUntilExit()
 
@@ -157,6 +160,18 @@ nonisolated struct CLIService: AIService {
         return out
     }
 
+    /// SIGTERM now, SIGKILL after 2s if it is still running: a CLI that ignores TERM (or a
+    /// grandchild holding stdout open) would otherwise hang the read and leave a zombie
+    /// after esc. Safe to call before launch (does nothing) or after exit.
+    static func stop(_ process: Process) {
+        guard process.isRunning else { return }
+        process.terminate()
+        let pid = process.processIdentifier
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if process.isRunning { kill(pid, SIGKILL) }
+        }
+    }
+
     /// Last meaningful line the CLI printed, which is where both put their error.
     static func failureMessage(stderr: String, stdout: String, provider: AIProvider, status: Int32) -> String {
         let line = (stderr + "\n" + stdout).split(whereSeparator: \.isNewline)
@@ -164,4 +179,12 @@ nonisolated struct CLIService: AIService {
             .last { !$0.isEmpty }
         return line.map { "\(provider.shortName): \($0)" } ?? "\(provider.shortName) exited with code \(status)."
     }
+}
+
+/// Set when the consumer goes away, so a run that hasn't launched yet can abort.
+nonisolated final class CancelFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    var value: Bool { lock.lock(); defer { lock.unlock() }; return flag }
+    func set() { lock.lock(); flag = true; lock.unlock() }
 }

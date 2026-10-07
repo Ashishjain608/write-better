@@ -124,7 +124,15 @@ struct MenuBarMenu: View {
     /// "Add API key…", which deep-links Settings to that row.
     @ViewBuilder
     private func providerSection(_ provider: AIProvider) -> some View {
-        if settings.configuredProviders.contains(provider) {
+        if settings.configuredProviders.contains(provider) && provider.models.isEmpty {
+            Button {
+                settings.selectedProvider = provider
+            } label: {
+                Text(settings.selectedProvider == provider
+                     ? "✓ \(provider.displayName)"
+                     : "   \(provider.displayName)")
+            }
+        } else if settings.configuredProviders.contains(provider) {
             Menu {
                 ForEach(provider.models) { model in
                     Button {
