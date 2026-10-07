@@ -14,6 +14,7 @@ final class SettingsStore: ObservableObject {
     private enum Key {
         static let selectedProvider = "selectedProvider"
         static let modelIDs = "modelIDsByProvider"
+        static let efforts = "effortsByProvider"
         static let customBaseURL = "customEndpointBaseURL"
         static let autoCaptureSelection = "autoCaptureSelection"
         static let launchAtLogin = "launchAtLogin"
@@ -143,7 +144,20 @@ final class SettingsStore: ObservableObject {
         case .anthropic, .openai, .gemini: return hasKey(for: provider)
         case .custom: return customEndpointURL != nil
         case .apple: return AppleIntelligence.isAvailable
+        case .claudeCode, .codex: return CLIService.executable(for: provider) != nil
         }
+    }
+
+    /// Reasoning effort for a CLI provider (`CLIService.efforts`).
+    func effort(for provider: AIProvider) -> String {
+        (defaults.dictionary(forKey: Key.efforts) as? [String: String])?[provider.rawValue] ?? CLIService.defaultEffort
+    }
+
+    func setEffort(_ effort: String, for provider: AIProvider) {
+        var all = defaults.dictionary(forKey: Key.efforts) as? [String: String] ?? [:]
+        all[provider.rawValue] = effort
+        defaults.set(all, forKey: Key.efforts)
+        objectWillChange.send()
     }
 
     // MARK: Model selection
@@ -185,7 +199,7 @@ final class SettingsStore: ObservableObject {
     }
 
     private func refreshKeyCache() {
-        for provider in AIProvider.allCases where provider != .apple {
+        for provider in AIProvider.allCases where provider != .apple && !provider.isCLI {
             readKey(for: provider)
         }
         recomputeConfiguredProviders()

@@ -25,13 +25,14 @@ nonisolated enum AIServiceFactory {
         return service(for: provider,
                        apiKey: settings.apiKey(for: provider),
                        modelID: settings.modelID(for: provider),
-                       baseURL: settings.customEndpointURL)
+                       baseURL: settings.customEndpointURL,
+                       effort: settings.effort(for: provider))
     }
 
     /// Ad-hoc service, used by Settings' "Test" button before the key is saved.
     /// `baseURL` is only read for the custom endpoint.
     static func service(for provider: AIProvider, apiKey: String, modelID: String,
-                        baseURL: URL? = nil) -> AIService {
+                        baseURL: URL? = nil, effort: String = CLIService.defaultEffort) -> AIService {
         switch provider {
         case .anthropic:
             return AnthropicService(modelID: modelID, apiKey: apiKey)
@@ -43,6 +44,8 @@ nonisolated enum AIServiceFactory {
             // Callers gate on availability; on a Mac that can't host it the request
             // fails with the reason instead of crashing.
             return AppleIntelligence.makeService() ?? UnavailableService(provider: .apple)
+        case .claudeCode, .codex:
+            return CLIService(provider: provider, modelID: modelID, effort: effort)
         case .custom:
             return CustomEndpointService(modelID: modelID, apiKey: apiKey,
                                          baseURL: baseURL ?? URL(string: CustomEndpointService.presets[0].baseURL)!)

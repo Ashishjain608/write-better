@@ -55,6 +55,7 @@ nonisolated enum WriteBetterSelfCheck {
         checkModelCatalogs(report)
         checkCustomEndpoint(report)
         checkAppleOnDevice(report)
+        checkCLI(report)
         checkTruncation(report)
         checkSSEParser(report)
         checkAnthropicStream(report)
@@ -693,6 +694,52 @@ nonisolated enum WriteBetterSelfCheck {
                      first.fenceTag.hasPrefix("user_text_") && first.fenceTag.count == "user_text_".count + 32)
     }
 
+    // MARK: Claude Code / Codex CLI
+
+    private static func checkCLI(_ report: Report) {
+        let improvement = ImprovementRequest(originalText: sampleText, action: .concise)
+        let claude = CLIService(provider: .claudeCode, modelID: "haiku", effort: "high")
+        let codex = CLIService(provider: .codex, modelID: "gpt-6-luna", effort: "max")
+        let claudeArgs = claude.arguments(for: improvement)
+        let codexArgs = codex.arguments(for: improvement)
+
+        report.check("CLI providers are always offered",
+                     AIProvider.allCases.contains(.claudeCode) && AIProvider.allCases.contains(.codex))
+        report.check("CLI providers need no key", !AIProvider.claudeCode.needsAPIKey && !AIProvider.codex.needsAPIKey)
+        report.check("claude gets the chosen model", claudeArgs.contains(["--model", "haiku"]))
+        report.check("claude gets the chosen effort", claudeArgs.contains(["--effort", "high"]))
+        report.check("claude runs with no tools", claudeArgs.contains(["--tools", ""]))
+        report.check("claude gets the system prompt", claudeArgs.last == improvement.systemPrompt)
+        report.equal("claude reads the user prompt on stdin", claude.stdinPrompt(for: improvement), improvement.userPrompt)
+        report.check("codex gets the chosen model", codexArgs.contains(["--model", "gpt-6-luna"]))
+        report.check("codex gets the chosen effort", codexArgs.contains("model_reasoning_effort=\"max\""))
+        report.check("codex is read-only", codexArgs.contains(["--sandbox", "read-only"]))
+        report.check("codex stdin carries rules then text",
+                     codex.stdinPrompt(for: improvement).hasPrefix(improvement.systemPrompt)
+                     && codex.stdinPrompt(for: improvement).hasSuffix(improvement.userPrompt))
+        report.equal("CLI failure shows the last line",
+                     CLIService.failureMessage(stderr: "warn\nError: not logged in\n", stdout: "", provider: .codex, status: 1),
+                     "Codex: Error: not logged in")
+        report.equal("CLI failure without output shows the exit code",
+                     CLIService.failureMessage(stderr: "", stdout: "", provider: .claudeCode, status: 2),
+                     "Claude Code exited with code 2.")
+        report.check("missing CLI error names the command",
+                     (AIServiceError.missingKey(.codex).errorDescription ?? "").contains("codex"))
+
+        MainActor.assumeIsolated {
+            let suite = "com.aj.WriteBetter.selfcheck.cli"
+            let defaults = UserDefaults(suiteName: suite)!
+            defaults.removePersistentDomain(forName: suite)
+            let store = SettingsStore(defaults: defaults, keychainService: "com.aj.WriteBetter.selfcheck.cli")
+            report.equal("CLI effort defaults to low", store.effort(for: .codex), "low")
+            store.setEffort("xhigh", for: .codex)
+            report.equal("CLI effort persists per provider", store.effort(for: .codex), "xhigh")
+            report.equal("other CLI keeps its own effort", store.effort(for: .claudeCode), "low")
+            report.equal("claude defaults to sonnet", store.modelID(for: .claudeCode), "sonnet")
+            defaults.removePersistentDomain(forName: suite)
+        }
+    }
+
     // MARK: Apple on-device
 
     private static func checkAppleOnDevice(_ report: Report) {
@@ -1095,6 +1142,10 @@ nonisolated enum WriteBetterSelfCheck {
             say("availability: \(AppleIntelligence.availability)")
             service = apple
             text = args[1...].joined(separator: " ")
+        case "claudeCode", "codex":
+            guard args.count >= 4 else { say("usage: \(kind) <model> <effort> <text…>"); return false }
+            service = CLIService(provider: AIProvider(rawValue: kind)!, modelID: args[1], effort: args[2])
+            text = args[3...].joined(separator: " ")
         default:
             say("unknown provider \(kind)"); return false
         }

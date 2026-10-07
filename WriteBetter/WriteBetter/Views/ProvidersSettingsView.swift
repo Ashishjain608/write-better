@@ -126,7 +126,7 @@ struct ProvidersSettingsView: View {
                     .buttonStyle(TileButtonStyle(isSelected: settings.selectedProvider == provider))
                     .accessibilityLabel(provider.displayName)
                     .accessibilityValue(settings.isUsable(provider) ? "Ready"
-                                        : (provider.needsAPIKey ? "Needs a key" : "Needs a server address"))
+                                        : (provider.needsAPIKey ? "Needs a key" : (provider.isCLI ? "Not installed" : "Needs a server address")))
                     .accessibilityAddTraits(settings.selectedProvider == provider ? [.isSelected] : [])
                 }
             }
@@ -136,11 +136,11 @@ struct ProvidersSettingsView: View {
     private func statusCaption(for provider: AIProvider) -> some View {
         Group {
             if settings.isUsable(provider) {
-                Label(provider.needsAPIKey ? "key" : (provider == .apple ? "on-device" : "server"),
+                Label(provider.needsAPIKey ? "key" : (provider == .apple ? "on-device" : (provider.isCLI ? "subscription" : "server")),
                       systemImage: "checkmark.circle.fill")
                     .foregroundStyle(Theme.Color.success)
             } else {
-                Label(provider.needsAPIKey ? "add key" : "add server",
+                Label(provider.needsAPIKey ? "add key" : (provider.isCLI ? "not installed" : "add server"),
                       systemImage: "exclamationmark.circle.fill")
                     .foregroundStyle(Theme.Color.warning)
             }
@@ -312,10 +312,10 @@ private struct ProviderRow: View {
                 StatusPill(text: "Keychain locked", tint: Theme.Color.warning,
                            systemImage: "lock.fill")
             } else if settings.isUsable(provider) {
-                StatusPill(text: provider.needsAPIKey ? "Key saved" : (provider == .apple ? "Ready" : "Server set"),
+                StatusPill(text: provider.needsAPIKey ? "Key saved" : (provider == .apple || provider.isCLI ? "Ready" : "Server set"),
                            tint: Theme.Color.success, systemImage: "checkmark.circle.fill")
             } else {
-                Text(provider.needsAPIKey ? "No key" : "No server").textStyle(.caption)
+                Text(provider.needsAPIKey ? "No key" : (provider.isCLI ? "Not installed" : "No server")).textStyle(.caption)
             }
         }
     }
@@ -331,8 +331,50 @@ private struct ProviderRow: View {
                  """)
                 .textStyle(.caption)
                 .fixedSize(horizontal: false, vertical: true)
+        } else if provider.isCLI {
+            cliBody
         } else {
             keyedBody
+        }
+    }
+
+    /// Claude Code / Codex: no key, just the installed CLI, a model and an effort level.
+    private var cliBody: some View {
+        let command = CLIService.binaryName(for: provider)
+        return VStack(alignment: .leading, spacing: Theme.Space.lg) {
+            HStack(alignment: .top, spacing: Theme.Space.md) {
+                Text(settings.isUsable(provider)
+                     ? "Runs the `\(command)` command on this Mac, billed to the subscription you're signed in with. No API key."
+                     : "`\(command)` isn't installed. Install \(provider.shortName), sign in once in Terminal, then reopen Settings.")
+                    .textStyle(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Theme.Space.md)
+                Button(action: test) {
+                    if case .testing = testState { ProgressView().controlSize(.small) } else { Text("Test") }
+                }
+                .buttonStyle(SecondaryButtonStyle(minWidth: 84))
+                .disabled(isTesting || !settings.isUsable(provider))
+                .help("Check that \(command) is installed and signed in")
+            }
+            if case .invalid(let message) = testState {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .textStyle(.caption)
+                    .foregroundStyle(Theme.Color.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            modelSection
+            HStack(spacing: Theme.Space.lg) {
+                Text("Effort").textStyle(.caption)
+                Spacer(minLength: Theme.Space.lg)
+                Picker("", selection: Binding(get: { settings.effort(for: provider) },
+                                              set: { settings.setEffort($0, for: provider) })) {
+                    ForEach(CLIService.efforts, id: \.self) { Text($0.capitalized).tag($0) }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: 260)
+                .accessibilityLabel("\(provider.displayName) effort")
+            }
         }
     }
 

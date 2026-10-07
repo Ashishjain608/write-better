@@ -27,6 +27,10 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
     case custom
     /// Apple's on-device model (macOS 26+, Apple Intelligence). Listed only where it can run.
     case apple
+    /// The signed-in `claude` CLI, billed to the user's Claude subscription.
+    case claudeCode
+    /// The signed-in `codex` CLI, billed to the user's ChatGPT subscription.
+    case codex
 
     /// Every provider that can be used on this Mac. Apple's on-device model appears
     /// only when Apple Intelligence is available, so every picker in the app hides it
@@ -34,7 +38,7 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
     static var allCases: [AIProvider] {
         var all: [AIProvider] = [.anthropic, .openai, .gemini]
         if AppleIntelligence.isAvailable { all.append(.apple) }
-        all.append(.custom)
+        all += [.claudeCode, .codex, .custom]
         return all
     }
 
@@ -47,6 +51,8 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .gemini: return "Google Gemini"
         case .custom: return "Custom (OpenAI-compatible)"
         case .apple: return "Apple (on-device)"
+        case .claudeCode: return "Claude Code (subscription)"
+        case .codex: return "Codex (subscription)"
         }
     }
 
@@ -55,6 +61,8 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         switch self {
         case .custom: return "Custom"
         case .apple: return "Apple"
+        case .claudeCode: return "Claude Code"
+        case .codex: return "Codex"
         default: return displayName
         }
     }
@@ -64,9 +72,12 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
     var needsAPIKey: Bool {
         switch self {
         case .anthropic, .openai, .gemini: return true
-        case .custom, .apple: return false
+        case .custom, .apple, .claudeCode, .codex: return false
         }
     }
+
+    /// Runs through a locally installed agent CLI and its subscription, not an API.
+    var isCLI: Bool { self == .claudeCode || self == .codex }
 
     var modelFamilyName: String {
         switch self {
@@ -75,6 +86,8 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .gemini: return "Gemini"
         case .custom: return "Any model"
         case .apple: return "On-device"
+        case .claudeCode: return "Claude"
+        case .codex: return "GPT"
         }
     }
 
@@ -86,6 +99,7 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .gemini: return "diamond.fill"
         case .custom: return "server.rack"
         case .apple: return "cpu"
+        case .claudeCode, .codex: return "terminal"
         }
     }
 
@@ -97,6 +111,8 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .gemini:    return Color(red: 0.26, green: 0.52, blue: 0.96) // blue
         case .custom:    return Color(red: 0.55, green: 0.45, blue: 0.85) // violet
         case .apple:     return Color(red: 0.45, green: 0.50, blue: 0.58) // graphite
+        case .claudeCode: return Color(red: 0.85, green: 0.55, blue: 0.30) // amber
+        case .codex:     return Color(red: 0.30, green: 0.33, blue: 0.38) // slate
         }
     }
 
@@ -106,7 +122,7 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .openai: return "sk-proj-…"
         case .gemini: return "AIza…"
         case .custom: return "API key (optional)"
-        case .apple: return ""
+        case .apple, .claudeCode, .codex: return ""
         }
     }
 
@@ -119,7 +135,7 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         switch self {
         case .anthropic: return "sk-ant-"
         case .openai: return "sk-"
-        case .gemini, .custom, .apple: return nil
+        case .gemini, .custom, .apple, .claudeCode, .codex: return nil
         }
     }
 
@@ -131,6 +147,8 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .gemini: return URL(string: "https://aistudio.google.com/apikey")!
         case .custom: return URL(string: "https://openrouter.ai/keys")!
         case .apple: return URL(string: "https://www.apple.com/apple-intelligence/")!
+        case .claudeCode: return URL(string: "https://docs.anthropic.com/en/docs/claude-code/setup")!
+        case .codex: return URL(string: "https://developers.openai.com/codex/cli")!
         }
     }
 
@@ -179,6 +197,20 @@ nonisolated enum AIProvider: String, CaseIterable, Identifiable, Codable, Sendab
         case .apple:
             return [AIModelOption(id: "apple-on-device", name: "On-device model",
                                   blurb: "Private, free, no key")]
+        case .claudeCode:
+            // CLI aliases, so they always mean the latest model of each tier.
+            return [
+                AIModelOption(id: "sonnet", name: "Sonnet", blurb: "Recommended — best balance"),
+                AIModelOption(id: "opus", name: "Opus", blurb: "Highest quality, slower"),
+                AIModelOption(id: "haiku", name: "Haiku", blurb: "Fastest, lightest on limits"),
+                AIModelOption(id: "fable", name: "Fable", blurb: "Most capable"),
+            ]
+        case .codex:
+            return [
+                AIModelOption(id: "gpt-5.6-terra", name: "GPT-5.6 Terra", blurb: "Recommended — best balance"),
+                AIModelOption(id: "gpt-6.1-sol", name: "GPT-6.1 Sol", blurb: "Highest quality, slower"),
+                AIModelOption(id: "gpt-6-luna", name: "GPT-6 Luna", blurb: "Fastest, lightest on limits"),
+            ]
         }
     }
 
