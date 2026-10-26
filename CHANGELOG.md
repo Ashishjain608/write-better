@@ -6,6 +6,11 @@ All notable changes to WriteBetter are recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-26
+
+### Fixed
+- Claude Code CLI provider failed every rewrite with `error: unknown option '--safe-mode'`. The flag never existed; `--system-prompt` already prevents CLAUDE.md auto-discovery, which is what the flag was meant to do.
+
 ## [1.1.0] - 2026-10-07
 
 First public release.

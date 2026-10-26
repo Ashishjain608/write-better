@@ -50,9 +50,9 @@ nonisolated struct CLIService: AIService {
                     "--color", "never", "--model", modelID,
                     "-c", "model_reasoning_effort=\"\(effort)\"", "-"]
         default:
-            // --safe-mode skips the user's hooks, plugins and CLAUDE.md but keeps the
-            // subscription login (--bare would demand an API key).
-            return ["-p", "--safe-mode", "--tools", "", "--no-session-persistence",
+            // --system-prompt replaces the default system prompt, which is what pulls in
+            // CLAUDE.md. --bare would also skip hooks/plugins but demands an API key.
+            return ["-p", "--tools", "", "--no-session-persistence",
                     "--output-format", "text", "--model", modelID, "--effort", effort,
                     "--system-prompt", improvement.systemPrompt]
         }
