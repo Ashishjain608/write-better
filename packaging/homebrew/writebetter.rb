@@ -5,8 +5,8 @@
 #   shasum -a 256 WriteBetter-X.Y.Z.dmg
 # WriteBetter updates itself through Sparkle, hence auto_updates.
 cask "writebetter" do
-  version "1.1.0"
-  sha256 "9fe9a0152bd38e93129ff81ec0f02ed7d125cb29479adba343024b1a9f5d1e45"
+  version "1.1.1"
+  sha256 "9256afc54f1aad979790a9691593350da6c82a2df04655b47617fc93922e0e0b"
 
   url "https://github.com/Ashishjain608/write-better/releases/download/v#{version}/WriteBetter-#{version}.dmg"
   name "WriteBetter"
